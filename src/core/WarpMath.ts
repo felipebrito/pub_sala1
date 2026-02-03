@@ -5,35 +5,67 @@ export class WarpMath {
      * Interpolates a grid of control points to find a position at (u, v)
      * using Bicubic (Cubic-Hermite mostly) or Bilinear interpolation.
      */
+    /**
+     * Interpolates a grid of control points to find a position at (u, v)
+     * using Bicubic (smooth) or Bilinear (linear/folded) interpolation.
+     */
     static interpolate(
         u: number,
         v: number,
         grid: { x: number, y: number }[][], // [rows][cols]
         gridCols: number,
-        gridRows: number
+        gridRows: number,
+        mode: 'linear' | 'bicubic' = 'bicubic'
     ): { x: number, y: number } {
-
-        // Map 0..1 (u,v) to Grid Coordinates
-        // e.g. if 3x3 grid (indices 0, 1, 2), u=0.5 corresponds to index 1.0
-        const x = u * (gridCols - 1);
-        const y = v * (gridRows - 1);
-
-        // For simple 2x2 (Corner Pin), use Bilinear (Linear Straight Edges)
+        // Force bilinear for 2x2 grids as cubic requires more context to be useful, 
+        // essentially identical for 2x2 but safer to stick to bilinear.
         if (gridCols === 2 && gridRows === 2) {
             return this.bilinear(u, v, grid);
         }
 
-        // For N > 2, use Cubic Spline for smooth curves
-        // Using Catmull-Rom logic simplified for Grid
+        const x = u * (gridCols - 1);
+        const y = v * (gridRows - 1);
+
+        if (mode === 'linear') {
+            return this.bilinearPatch(x, y, grid, gridCols, gridRows);
+        }
+
         return this.bicubic(x, y, grid, gridCols, gridRows);
     }
 
+    // Standard 2x2 bilinear (0..1)
     private static bilinear(u: number, v: number, grid: { x: number, y: number }[][]) {
         const tl = grid[0][0];
         const tr = grid[0][1];
         const bl = grid[1][0];
         const br = grid[1][1];
 
+        return this.lerp2d(tl, tr, bl, br, u, v);
+    }
+
+    // Patch Bilinear: finds the specific grid cell (quad) we are in and interpolates within it
+    private static bilinearPatch(x: number, y: number, grid: { x: number, y: number }[][], cols: number, rows: number) {
+        // Indices of the cell
+        let c = Math.floor(x);
+        let r = Math.floor(y);
+
+        // Clamp to last valid cell
+        if (c >= cols - 1) c = cols - 2;
+        if (r >= rows - 1) r = rows - 2;
+
+        // Local UV (0..1) within the cell
+        const u = x - c;
+        const v = y - r;
+
+        const tl = grid[r][c];
+        const tr = grid[r][c + 1];
+        const bl = grid[r + 1][c];
+        const br = grid[r + 1][c + 1];
+
+        return this.lerp2d(tl, tr, bl, br, u, v);
+    }
+
+    private static lerp2d(tl: any, tr: any, bl: any, br: any, u: number, v: number) {
         const topX = tl.x * (1 - u) + tr.x * u;
         const topY = tl.y * (1 - u) + tr.y * u;
         const botX = bl.x * (1 - u) + br.x * u;

@@ -1,79 +1,141 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ThreeRenderer } from './core/ThreeRenderer'
 import { TEST_VIDEOS } from './constants/videos';
-import { Play, Pause } from 'lucide-react'
+import { Play, Pause, Grid3X3, MousePointer2 } from 'lucide-react'
 
+// Types
 interface Point { x: number; y: number }
+interface Crop { x: number, y: number, width: number, height: number }
+interface ProjectorConfig {
+    grid: Point[][]; // [rows][cols]
+    rows: number;
+    cols: number;
+    crop: Crop;
+    mode: 'linear' | 'bicubic'; // visualization/interaction mode: linear=Quad (2x2), bicubic=Bezier (Handles)
+}
 
-// Default warp points in LOCAL monitor coordinates (360x202 - CLOCKWISE: TL, TR, BR, BL)
-const DEFAULT_WARP = (): Point[] => [
-    { x: 0, y: 0 },           // Top-left
-    { x: 360, y: 0 },         // Top-right  
-    { x: 360, y: 202 },       // Bottom-right (clockwise)
-    { x: 0, y: 202 }          // Bottom-left
-];
+// Helper: Equidistant Grid
+const createDefaultGrid = (rows: number, cols: number, width = 360, height = 202): Point[][] => {
+    const grid: Point[][] = [];
+    for (let r = 0; r < rows; r++) {
+        const row: Point[] = [];
+        for (let c = 0; c < cols; c++) {
+            row.push({
+                x: (c / (cols - 1)) * width,
+                y: (r / (rows - 1)) * height
+            });
+        }
+        grid.push(row);
+    }
+    return grid;
+};
+
+// Auto-calculate internal points (P11, P12, P21, P22) for a 4x4 grid using Linear Coons Patch approximation
+// to ensure the surface follows the Bezier edges smoothly without manual internal controls.
+const calculateInternalPoints = (grid: Point[][]): Point[][] => {
+    if (grid.length !== 4 || grid[0].length !== 4) return grid;
+
+    // Indices
+    // 00 01 02 03
+    // 10 11 12 13
+    // 20 21 22 23
+    // 30 31 32 33
+
+    const newGrid = grid.map(row => row.map(p => ({ ...p })));
+
+    // We need to solve for 11, 12, 21, 22 based on the boundary.
+    // Simple approach: Bilinear interpolation of the opposing boundaries.
+
+    for (let i = 1; i <= 2; i++) {
+        for (let j = 1; j <= 2; j++) {
+            const u = j / 3;
+            const v = i / 3;
+
+            // Ruled surface approximations
+            // L_c(u, v) = (1-v)*P(u, 0) + v*P(u, 1)  <-- Vertical linear interpolation between Top and Bottom Curves
+            // But P(u,0) is point on top curve. We don't have the curve function, just control points.
+            // Actually, for 4x4 Bezier, the inner points *define* the surface.
+            // To make it "well behaved" like a Coons patch, we can interpolate.
+
+            // Simplest heuristic: Average of horizontal and vertical linear interpolations of control points
+            const left = newGrid[i][0];
+            const right = newGrid[i][3];
+            const top = newGrid[0][j];
+            const bottom = newGrid[3][j];
+
+            // Linearly interpolate row i
+            const lx = left.x + (right.x - left.x) * (j / 3);
+            const ly = left.y + (right.y - left.y) * (j / 3);
+
+            // Linearly interpolate col j
+            const cx = top.x + (bottom.x - top.x) * (i / 3);
+            const cy = top.y + (bottom.y - top.y) * (i / 3);
+
+            newGrid[i][j].x = (lx + cx) / 2;
+            newGrid[i][j].y = (ly + cy) / 2;
+        }
+    }
+    return newGrid;
+};
+
+// Default Config
+const DEFAULT_CONFIGS = (): ProjectorConfig[] => [0, 1, 2].map(i => ({
+    rows: 2,
+    cols: 2,
+    grid: createDefaultGrid(2, 2),
+    mode: 'linear', // Default to Quad
+    crop: {
+        x: i * (1 / 3),
+        y: 0,
+        width: 1 / 3,
+        height: 1
+    }
+}));
 
 export default function App() {
-    // Load saved video URL from localStorage
-    const loadVideoUrl = (): string => {
+    // --- State ---
+    const loadConfig = (): ProjectorConfig[] => {
         try {
-            return localStorage.getItem('lumina-video-url') || '';
-        } catch (e) {
-            return '';
-        }
-    };
-
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [videoUrl, setVideoUrl] = useState(loadVideoUrl);
-
-    // Load saved warping from localStorage or use defaults
-    const loadWarpPoints = (): Point[][] => {
-        try {
-            const saved = localStorage.getItem('lumina-warping');
-            if (saved) {
-                return JSON.parse(saved);
-            }
-        } catch (e) {
-            console.error('Failed to load warping:', e);
-        }
-        return [DEFAULT_WARP(), DEFAULT_WARP(), DEFAULT_WARP()];
-    };
-
-    const [warpPoints, setWarpPoints] = useState<Point[][]>(loadWarpPoints);
-
-    // Load saved input crops or use defaults (1/3 split)
-    const loadInputCrops = (): { x: number, y: number, width: number, height: number }[] => {
-        try {
-            const saved = localStorage.getItem('lumina-crops');
+            const saved = localStorage.getItem('lumina-config-v3'); // v3 for new props
             if (saved) return JSON.parse(saved);
         } catch (e) {
             console.error(e);
         }
-        // Creates 3 evenly spaced horizontal slices
-        return [0, 1, 2].map(i => ({
-            x: i * (1 / 3),
-            y: 0,
-            width: 1 / 3,
-            height: 1
-        }));
+        return DEFAULT_CONFIGS();
     };
 
-    const [inputCrops, setInputCrops] = useState(loadInputCrops);
+    const [projectors, setProjectors] = useState<ProjectorConfig[]>(loadConfig);
     const [selectedProjector, setSelectedProjector] = useState(0);
+    const [selectedPoints, setSelectedPoints] = useState<{ r: number, c: number }[]>([]);
 
+    // Video State
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [videoUrl, setVideoUrl] = useState(() => localStorage.getItem('lumina-video-url') || '');
+
+    // Refs
     const rendererRef = useRef<ThreeRenderer | null>(null);
     const videoRef = useRef<HTMLVideoElement | null>(null);
-    const container1Ref = useRef<HTMLDivElement>(null);
-    const container2Ref = useRef<HTMLDivElement>(null);
-    const container3Ref = useRef<HTMLDivElement>(null);
+    const containerRefs = [useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null)];
+    // We use a REF for selection to ensure Drag/Move has latest without re-attaching listeners constantly
+    const selectionRef = useRef<{ r: number, c: number }[]>([]);
+    useEffect(() => { selectionRef.current = selectedPoints }, [selectedPoints]);
 
+    // --- Effects ---
+
+    // 1. Initialize Renderer
     useEffect(() => {
-        if (container1Ref.current && container2Ref.current && container3Ref.current && !rendererRef.current) {
+        if (containerRefs[0].current && containerRefs[1].current && containerRefs[2].current && !rendererRef.current) {
             rendererRef.current = new ThreeRenderer(
-                container1Ref.current,
-                container2Ref.current,
-                container3Ref.current
+                containerRefs[0].current,
+                containerRefs[1].current,
+                containerRefs[2].current
             );
+
+            // Initial Push
+            projectors.forEach((proj, i) => {
+                rendererRef.current?.updateInputCrop(i, proj.crop);
+                rendererRef.current?.updateGridWarp(i, proj.grid, proj.rows, proj.cols, proj.mode);
+            });
         }
         return () => {
             rendererRef.current?.dispose();
@@ -81,148 +143,188 @@ export default function App() {
         };
     }, []);
 
-    // Auto-save video URL to localStorage
+    // 2. Sync Projectors Projectors -> Renderer & Storage
     useEffect(() => {
-        try {
-            if (videoUrl) {
-                localStorage.setItem('lumina-video-url', videoUrl);
-            }
-        } catch (e) {
-            console.error('Failed to save video URL:', e);
-        }
-    }, [videoUrl]);
+        localStorage.setItem('lumina-config-v3', JSON.stringify(projectors));
 
-    // Auto-save warping to localStorage whenever it changes
-    useEffect(() => {
-        try {
-            localStorage.setItem('lumina-warping', JSON.stringify(warpPoints));
-        } catch (e) {
-            console.error('Failed to save warping:', e);
-        }
-    }, [warpPoints]);
+        if (!rendererRef.current) return;
 
-    useEffect(() => {
-        if (rendererRef.current) {
-            warpPoints.forEach((points, i) => rendererRef.current?.updateWarping(i, points));
-        }
-    }, [warpPoints]);
+        projectors.forEach((proj, i) => {
+            rendererRef.current?.updateInputCrop(i, proj.crop);
+            rendererRef.current?.updateGridWarp(i, proj.grid, proj.rows, proj.cols, proj.mode);
+        });
+    }, [projectors]);
 
-    // Load and apply video when URL changes
+    // 3. Video Handling
     useEffect(() => {
-        console.log('[App] useEffect videoUrl changed:', videoUrl);
-        if (!videoUrl || !videoRef.current || !rendererRef.current) {
-            console.log('[App] Early return:', { videoUrl, hasVideoRef: !!videoRef.current, hasRenderer: !!rendererRef.current });
-            return;
-        }
+        localStorage.setItem('lumina-video-url', videoUrl);
+        if (!videoUrl || !videoRef.current || !rendererRef.current) return;
 
         const video = videoRef.current;
-        console.log('[App] Setting video src:', videoUrl);
         video.src = videoUrl;
-        video.loop = true;
-        video.muted = true; // Auto-play requires muted
         video.crossOrigin = 'anonymous';
 
         const handleCanPlay = () => {
-            console.log('[App] Video canplay event fired', {
-                videoWidth: video.videoWidth,
-                videoHeight: video.videoHeight,
-                readyState: video.readyState
-            });
-            if (rendererRef.current) {
-                console.log('[App] Calling rendererRef.setVideo()');
-                rendererRef.current.setVideo(video);
-                // Auto-play when loaded
-                video.play().then(() => {
-                    console.log('[App] Video playback started');
-                    setIsPlaying(true);
-                }).catch(err => {
-                    console.error('[App] Autoplay failed:', err);
-                    setIsPlaying(false);
-                });
-            }
+            if (video.videoWidth === 0) return;
+            rendererRef.current?.setVideo(video);
+            video.play().then(() => setIsPlaying(true)).catch(console.error);
         };
 
         video.addEventListener('canplay', handleCanPlay);
-        console.log('[App] canplay listener added');
-
-        return () => {
-            console.log('[App] Cleanup - removing listener');
-            video.removeEventListener('canplay', handleCanPlay);
-            video.pause();
-            video.src = '';
-            setIsPlaying(false);
-        };
+        return () => video.removeEventListener('canplay', handleCanPlay);
     }, [videoUrl]);
 
-    // Save crops when changed and update renderer
-    useEffect(() => {
-        localStorage.setItem('lumina-crops', JSON.stringify(inputCrops));
-        // Update renderer
-        inputCrops.forEach((crop, i) => {
-            if (rendererRef.current) {
-                rendererRef.current.updateInputCrop(i, crop);
-            }
-        });
-    }, [inputCrops]);
+    // --- Logic ---
 
-    // Update crop helper
-    const updateCrop = (index: number, field: string, value: number) => {
-        setInputCrops(prev => {
-            const newCrops = [...prev];
-            newCrops[index] = { ...newCrops[index], [field]: value };
-            return newCrops;
+    const updateProjector = (index: number, updater: (prev: ProjectorConfig) => ProjectorConfig) => {
+        setProjectors(prev => {
+            const next = [...prev];
+            next[index] = updater(next[index]);
+            return next;
         });
     };
 
-    const updatePoint = useCallback((projIdx: number, pointIdx: number, delta: Point) => {
-        setWarpPoints(prev => {
-            const next = [...prev];
-            next[projIdx] = [...next[projIdx]];
-            next[projIdx][pointIdx] = {
-                x: next[projIdx][pointIdx].x + delta.x,
-                y: next[projIdx][pointIdx].y + delta.y
-            };
-            return next;
-        });
-    }, []);
+    const setMode = (mode: 'linear' | 'bicubic') => {
+        updateProjector(selectedProjector, prev => {
+            let newRows = prev.rows;
+            let newCols = prev.cols;
+            let newGrid = prev.grid;
 
-    const resetWarping = () => {
-        setWarpPoints([DEFAULT_WARP(), DEFAULT_WARP(), DEFAULT_WARP()]);
+            if (mode === 'bicubic') {
+                // Swithing to Bezier: Upgrade to 4x4 if not already compatible
+                if (prev.rows < 4) {
+                    newRows = 4;
+                    newCols = 4;
+                    // Resample simple 2x2 or 3x3 to 4x4 linear initial state
+                    newGrid = createDefaultGrid(4, 4);
+                    // ideally we should preserve corners, but reset is safer for now to avoid complexity
+                }
+            } else {
+                // Switching to Quad: Downgrade to 2x2
+                newRows = 2;
+                newCols = 2;
+                newGrid = createDefaultGrid(2, 2);
+            }
+
+            return {
+                ...prev,
+                mode,
+                rows: newRows,
+                cols: newCols,
+                grid: newGrid
+            };
+        });
+        setSelectedPoints([]); // Clear selection
+    };
+
+    const updateCrop = (field: keyof Crop, value: number) => {
+        updateProjector(selectedProjector, prev => ({
+            ...prev,
+            crop: { ...prev.crop, [field]: value }
+        }));
+    };
+
+    const handleDragStart = (projIdx: number, rStart: number, cStart: number, e: React.MouseEvent) => {
+        e.preventDefault();
+
+        // 1. Update Selection
+        let newSelection = [...selectedPoints];
+        const isSelected = newSelection.find(p => p.r === rStart && p.c === cStart);
+
+        if (e.shiftKey || e.ctrlKey) {
+            if (isSelected) newSelection = newSelection.filter(p => p.r !== rStart || p.c !== cStart);
+            else newSelection.push({ r: rStart, c: cStart });
+        } else {
+            if (!isSelected) newSelection = [{ r: rStart, c: cStart }];
+        }
+
+        setSelectedPoints(newSelection);
+        selectionRef.current = newSelection;
+
+        // 2. Drag
+        const onMove = (m: MouseEvent) => {
+            const dx = m.movementX;
+            const dy = m.movementY;
+
+            setProjectors(prev => {
+                const next = [...prev];
+                const active = next[projIdx];
+                let newGrid = active.grid.map(row => row.map(pt => ({ ...pt })));
+
+                // If moving a CORNER in Bezier mode, we must also move its adjacent handles
+                // to maintain their relative position to the corner.
+                const corners = [
+                    { r: 0, c: 0 }, { r: 0, c: 3 },
+                    { r: 3, c: 0 }, { r: 3, c: 3 }
+                ];
+
+                selectionRef.current.forEach(pt => {
+                    const isCorner = active.mode === 'bicubic' && corners.some(c => c.r === pt.r && c.c === pt.c);
+
+                    // Move the point itself
+                    if (newGrid[pt.r] && newGrid[pt.r][pt.c]) {
+                        newGrid[pt.r][pt.c].x += dx;
+                        newGrid[pt.r][pt.c].y += dy;
+                    }
+
+                    // Move Handles relative to corner if corner moved
+                    if (isCorner) {
+                        // Find neighbors (handles)
+                        // Top-Left (0,0) -> (0,1) and (1,0)
+                        if (pt.r === 0 && pt.c === 0) { newGrid[0][1].x += dx; newGrid[0][1].y += dy; newGrid[1][0].x += dx; newGrid[1][0].y += dy; }
+                        // Top-Right (0,3) -> (0,2) and (1,3)
+                        if (pt.r === 0 && pt.c === 3) { newGrid[0][2].x += dx; newGrid[0][2].y += dy; newGrid[1][3].x += dx; newGrid[1][3].y += dy; }
+                        // Bottom-Left (3,0) -> (2,0) and (3,1)
+                        if (pt.r === 3 && pt.c === 0) { newGrid[2][0].x += dx; newGrid[2][0].y += dy; newGrid[3][1].x += dx; newGrid[3][1].y += dy; }
+                        // Bottom-Right (3,3) -> (2,3) and (3,2)
+                        if (pt.r === 3 && pt.c === 3) { newGrid[2][3].x += dx; newGrid[2][3].y += dy; newGrid[3][2].x += dx; newGrid[3][2].y += dy; }
+                    }
+                });
+
+                // Recalculate internal points for Bezier smoothing
+                if (active.mode === 'bicubic') {
+                    newGrid = calculateInternalPoints(newGrid);
+                }
+
+                next[projIdx] = { ...active, grid: newGrid };
+                return next;
+            });
+        };
+
+        const onUp = () => {
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+        };
+
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
     };
 
     const togglePlayback = () => {
         if (!videoRef.current) return;
-
-        if (isPlaying) {
-            videoRef.current.pause();
-        } else {
-            videoRef.current.play();
-        }
+        isPlaying ? videoRef.current.pause() : videoRef.current.play();
         setIsPlaying(!isPlaying);
     };
 
     const loadVideo = () => {
-        const url = prompt('Enter video URL (direct link to mp4, webm, etc):');
-        if (url) {
-            setVideoUrl(url);
-        }
+        const url = prompt('Enter video URL:');
+        if (url) setVideoUrl(url);
     };
 
     return (
         <div className="flex h-screen bg-[#0a0e1a] text-slate-300">
-            {/* Hidden video element */}
             <video ref={videoRef} style={{ display: 'none' }} playsInline autoPlay muted loop />
 
-            {/* Sidebar */}
-            <aside className="w-64 bg-[#0f1419] border-r border-white/10 p-6 flex flex-col gap-6">
+            <aside className="w-64 bg-[#0f1419] border-r border-white/10 p-6 flex flex-col gap-6 overflow-y-auto z-10 shrink-0">
                 <div>
                     <h1 className="text-xl font-bold text-white mb-1">Lumina Mapper</h1>
                     <div className="text-xs text-slate-600">3 x 1920x1080 Projectors</div>
                 </div>
 
+                {/* Projectors Selection */}
                 <div>
                     <h2 className="text-xs font-bold text-slate-500 uppercase mb-3">Projectors</h2>
-                    {['P1 (Left)', 'P2 (Center)', 'P3 (Right)'].map((name, i) => (
+                    {projectors.map((_, i) => (
                         <button
                             key={i}
                             onClick={() => setSelectedProjector(i)}
@@ -231,290 +333,191 @@ export default function App() {
                                 : 'hover:bg-white/5'
                                 }`}
                         >
-                            {name}
+                            {i === 0 ? 'P1 (Left)' : i === 1 ? 'P2 (Center)' : 'P3 (Right)'}
                         </button>
                     ))}
                 </div>
 
-                {/* Input Mapping Controls */}
-                <div className="p-3 bg-white/5 rounded border border-white/5 space-y-3">
-                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
-                        Input Mapping (P{selectedProjector + 1})
-                    </h3>
-
-                    <div className="space-y-3">
-                        {/* X Position */}
-                        <div>
-                            <div className="flex justify-between text-[10px] mb-1">
-                                <span className="text-slate-500">X Position</span>
-                                <span>{Math.round(inputCrops[selectedProjector].x * 100)}%</span>
-                            </div>
-                            <input
-                                type="range" min="0" max="1" step="0.001"
-                                value={inputCrops[selectedProjector].x}
-                                onChange={(e) => updateCrop(selectedProjector, 'x', parseFloat(e.target.value))}
-                                className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                            />
-                        </div>
-
-                        {/* Width */}
-                        <div>
-                            <div className="flex justify-between text-[10px] mb-1">
-                                <span className="text-slate-500">Width</span>
-                                <span>{Math.round(inputCrops[selectedProjector].width * 100)}%</span>
-                            </div>
-                            <input
-                                type="range" min="0.01" max="1" step="0.001"
-                                value={inputCrops[selectedProjector].width}
-                                onChange={(e) => updateCrop(selectedProjector, 'width', parseFloat(e.target.value))}
-                                className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                            />
-                        </div>
-
-                        {/* Y Position */}
-                        <div>
-                            <div className="flex justify-between text-[10px] mb-1">
-                                <span className="text-slate-500">Y Position</span>
-                                <span>{Math.round(inputCrops[selectedProjector].y * 100)}%</span>
-                            </div>
-                            <input
-                                type="range" min="0" max="1" step="0.001"
-                                value={inputCrops[selectedProjector].y}
-                                onChange={(e) => updateCrop(selectedProjector, 'y', parseFloat(e.target.value))}
-                                className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                            />
-                        </div>
-
-                        {/* Height */}
-                        <div>
-                            <div className="flex justify-between text-[10px] mb-1">
-                                <span className="text-slate-500">Height</span>
-                                <span>{Math.round(inputCrops[selectedProjector].height * 100)}%</span>
-                            </div>
-                            <input
-                                type="range" min="0.01" max="1" step="0.001"
-                                value={inputCrops[selectedProjector].height}
-                                onChange={(e) => updateCrop(selectedProjector, 'height', parseFloat(e.target.value))}
-                                className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                            />
-                        </div>
+                {/* Mode Control */}
+                <div>
+                    <h2 className="text-xs font-bold text-slate-500 uppercase mb-2">Warp Mode</h2>
+                    <div className="flex bg-slate-800 rounded p-1">
+                        {(['linear', 'bicubic'] as const).map(mode => (
+                            <button
+                                key={mode}
+                                onClick={() => setMode(mode)}
+                                className={`flex-1 py-1.5 text-xs uppercase font-bold rounded ${projectors[selectedProjector].mode === mode
+                                        ? 'bg-amber-500 text-black shadow'
+                                        : 'text-slate-500 hover:text-slate-300'
+                                    }`}
+                            >
+                                {mode === 'linear' ? 'Quad' : 'Bezier'}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="text-[10px] text-slate-600 mt-2">
+                        {projectors[selectedProjector].mode === 'linear'
+                            ? 'Simple 4-corner perspective warp.'
+                            : 'Advanced Bezier warp with control handles.'}
                     </div>
                 </div>
 
+                {/* Input Mapping */}
+                <div className="p-3 bg-white/5 rounded border border-white/5 space-y-3">
+                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                        Input Mapping
+                    </h3>
+
+                    <div className="space-y-3">
+                        {['x', 'width', 'y', 'height'].map(field => (
+                            <div key={field}>
+                                <div className="flex justify-between text-[10px] mb-1 uppercase">
+                                    <span className="text-slate-500">{field}</span>
+                                    <span>{Math.round(projectors[selectedProjector].crop[field as keyof Crop] * 100)}%</span>
+                                </div>
+                                <input
+                                    type="range" min={field.includes('width') || field.includes('height') ? 0.01 : 0} max="1" step="0.001"
+                                    value={projectors[selectedProjector].crop[field as keyof Crop]}
+                                    onChange={(e) => updateCrop(field as keyof Crop, parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                                />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Video Controls */}
                 <div>
                     <h2 className="text-xs font-bold text-slate-500 uppercase mb-3">Video</h2>
                     <select
                         value={videoUrl}
                         onChange={(e) => setVideoUrl(e.target.value)}
-                        className="w-full bg-slate-800 text-white px-3 py-2 rounded-lg text-sm mb-2 border border-slate-700 hover:border-slate-600 focus:border-blue-500 focus:outline-none"
+                        className="w-full bg-slate-800 text-white px-3 py-2 rounded-lg text-sm mb-2 border border-slate-700 hover:border-slate-600 focus:outline-none"
                     >
                         <option value="">Select test video...</option>
                         {TEST_VIDEOS.map((video, i) => (
-                            <option key={i} value={video.url}>
-                                {video.title}
-                            </option>
+                            <option key={i} value={video.url}>{video.title}</option>
                         ))}
                     </select>
-                    {videoUrl && (
-                        <div className="text-xs text-slate-500 mb-2">
-                            {TEST_VIDEOS.find(v => v.url === videoUrl)?.description || 'Custom URL'}
-                        </div>
-                    )}
-                    <button
-                        onClick={loadVideo}
-                        className="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg transition-colors text-sm mb-2"
-                    >
+                    <button onClick={loadVideo} className="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm mb-2">
                         Custom URL...
                     </button>
                     <button
                         onClick={togglePlayback}
                         disabled={!videoUrl}
-                        className={`w-full px-4 py-2 rounded-lg transition-colors text-sm flex items-center justify-center gap-2 ${!videoUrl
-                            ? 'bg-slate-800 text-slate-600 cursor-not-allowed'
-                            : isPlaying
-                                ? 'bg-amber-600 hover:bg-amber-500 text-white'
-                                : 'bg-green-600 hover:bg-green-500 text-white'
+                        className={`w-full px-4 py-2 rounded-lg text-sm flex items-center justify-center gap-2 ${!videoUrl ? 'bg-slate-800 text-slate-600' :
+                                isPlaying ? 'bg-amber-600 hover:bg-amber-500' : 'bg-green-600 hover:bg-green-500'
                             }`}
                     >
                         {isPlaying ? <Pause size={16} /> : <Play size={16} />}
                         {isPlaying ? 'Pause' : 'Play'}
                     </button>
                 </div>
-
-                <div>
-                    <h2 className="text-xs font-bold text-slate-500 uppercase mb-3">Tools</h2>
-                    <button
-                        onClick={resetWarping}
-                        className="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg transition-colors text-sm"
-                    >
-                        Reset All Warping
-                    </button>
-                    {videoUrl && (
-                        <div className="mt-3 text-xs text-slate-500 break-all">
-                            Video: {videoUrl.substring(0, 40)}...
-                        </div>
-                    )}
-                </div>
-
-                <div className="mt-auto">
-                    <div className="text-xs text-slate-600">
-                        Phase 1.1 - Monitor Layout
-                    </div>
-                </div>
             </aside>
 
-            {/* Main Viewport - 3 Monitors Side by Side */}
-            <main className="flex-1 flex items-center justify-center p-8 bg-gradient-to-b from-transparent to-black/20">
-                <div className="flex flex-row gap-4">
-                    {/* Monitor 1 */}
-                    <div className="relative">
-                        <div className="text-xs text-slate-500 mb-2 font-bold">P1 - Left (1920x1080)</div>
-                        <div
-                            ref={container1Ref}
-                            className="rounded-lg overflow-hidden shadow-2xl ring-1 ring-white/20 relative"
-                            style={{ width: '360px', height: '202px', backgroundColor: '#000' }}
-                        />
+            {/* Main Viewport */}
+            <main className="flex-1 flex items-center justify-center p-8 bg-gradient-to-b from-transparent to-black/20 overflow-hidden select-none">
+                <div className="flex flex-row gap-4 transform scale-90 origin-center">
+                    {projectors.map((config, i) => (
+                        <div key={i} className="relative group">
+                            {/* Header */}
+                            <div className="text-xs text-slate-500 mb-2 font-bold uppercase tracking-wider flex justify-between pointer-events-none">
+                                <span>P{i + 1}</span>
+                                <span className={i === selectedProjector ? 'text-amber-500' : ''}>
+                                    {config.mode === 'linear' ? 'Quad' : 'Bezier'}
+                                </span>
+                            </div>
 
-                        {/* SVG Overlay for Monitor 1 */}
-                        <svg
-                            className="absolute top-6 left-0 pointer-events-none"
-                            width="360"
-                            height="202"
-                            style={{ pointerEvents: 'none' }}
-                        >
-                            <g opacity={selectedProjector === 0 ? 1 : 0.3}>
-                                <polygon
-                                    points={warpPoints[0].map(p => `${p.x},${p.y}`).join(' ')}
-                                    fill="none"
-                                    stroke={selectedProjector === 0 ? '#f59e0b' : '#60a5fa'}
-                                    strokeWidth="2"
-                                    strokeDasharray={selectedProjector === 0 ? '8,4' : '0'}
-                                />
-                                {warpPoints[0].map((pt, ptIdx) => (
-                                    <g
-                                        key={ptIdx}
-                                        style={{ pointerEvents: 'auto', cursor: 'move' }}
-                                        onMouseDown={(e) => {
-                                            e.preventDefault();
-                                            const onMove = (m: MouseEvent) => {
-                                                updatePoint(0, ptIdx, { x: m.movementX, y: m.movementY });
-                                            };
-                                            const onUp = () => {
-                                                window.removeEventListener('mousemove', onMove);
-                                                window.removeEventListener('mouseup', onUp);
-                                            };
-                                            window.addEventListener('mousemove', onMove);
-                                            window.addEventListener('mouseup', onUp);
-                                        }}
-                                    >
-                                        <circle cx={pt.x} cy={pt.y} r="15" fill="transparent" className="hover:fill-amber-500/20" />
-                                        <circle cx={pt.x} cy={pt.y} r="6" fill="#f59e0b" stroke="#000" strokeWidth="2" />
-                                        <circle cx={pt.x} cy={pt.y} r="2" fill="#fff" />
-                                    </g>
-                                ))}
-                            </g>
-                        </svg>
-                    </div>
+                            {/* Canvas Container */}
+                            <div
+                                ref={containerRefs[i]}
+                                className={`rounded-sm overflow-hidden shadow-2xl ring-1 relative bg-black transition-all ${selectedProjector === i ? 'ring-amber-500/50 shadow-amber-500/10' : 'ring-white/10'
+                                    }`}
+                                style={{ width: '360px', height: '202px' }}
+                                onMouseDown={() => setSelectedProjector(i)}
+                            />
 
-                    {/* Monitor 2 */}
-                    <div className="relative">
-                        <div className="text-xs text-slate-500 mb-2 font-bold">P2 - Center (1920x1080)</div>
-                        <div
-                            ref={container2Ref}
-                            className="rounded-lg overflow-hidden shadow-2xl ring-1 ring-white/20 relative"
-                            style={{ width: '360px', height: '202px', backgroundColor: '#000' }}
-                        />
+                            {/* SVG Overlay */}
+                            <svg className="absolute top-6 left-0 overflow-visible" width="360" height="202">
+                                <g opacity={selectedProjector === i ? 1 : 0.3} className="transition-opacity duration-300">
 
-                        <svg
-                            className="absolute top-6 left-0 pointer-events-none"
-                            width="360"
-                            height="202"
-                            style={{ pointerEvents: 'none' }}
-                        >
-                            <g opacity={selectedProjector === 1 ? 1 : 0.3}>
-                                <polygon
-                                    points={warpPoints[1].map(p => `${p.x},${p.y}`).join(' ')}
-                                    fill="none"
-                                    stroke={selectedProjector === 1 ? '#f59e0b' : '#60a5fa'}
-                                    strokeWidth="2"
-                                    strokeDasharray={selectedProjector === 1 ? '8,4' : '0'}
-                                />
-                                {warpPoints[1].map((pt, ptIdx) => (
-                                    <g
-                                        key={ptIdx}
-                                        style={{ pointerEvents: 'auto', cursor: 'move' }}
-                                        onMouseDown={(e) => {
-                                            e.preventDefault();
-                                            const onMove = (m: MouseEvent) => {
-                                                updatePoint(1, ptIdx, { x: m.movementX, y: m.movementY });
-                                            };
-                                            const onUp = () => {
-                                                window.removeEventListener('mousemove', onMove);
-                                                window.removeEventListener('mouseup', onUp);
-                                            };
-                                            window.addEventListener('mousemove', onMove);
-                                            window.addEventListener('mouseup', onUp);
-                                        }}
-                                    >
-                                        <circle cx={pt.x} cy={pt.y} r="15" fill="transparent" className="hover:fill-amber-500/20" />
-                                        <circle cx={pt.x} cy={pt.y} r="6" fill="#f59e0b" stroke="#000" strokeWidth="2" />
-                                        <circle cx={pt.x} cy={pt.y} r="2" fill="#fff" />
-                                    </g>
-                                ))}
-                            </g>
-                        </svg>
-                    </div>
+                                    {/* --- BEZIER VISUALIZATION --- */}
+                                    {config.mode === 'bicubic' && config.rows === 4 && (
+                                        <>
+                                            {/* Handle Lines */}
+                                            {/* Top Corners */}
+                                            <line x1={config.grid[0][0].x} y1={config.grid[0][0].y} x2={config.grid[0][1].x} y2={config.grid[0][1].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
+                                            <line x1={config.grid[0][0].x} y1={config.grid[0][0].y} x2={config.grid[1][0].x} y2={config.grid[1][0].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
 
-                    {/* Monitor 3 */}
-                    <div className="relative">
-                        <div className="text-xs text-slate-500 mb-2 font-bold">P3 - Right (1920x1080)</div>
-                        <div
-                            ref={container3Ref}
-                            className="rounded-lg overflow-hidden shadow-2xl ring-1 ring-white/20 relative"
-                            style={{ width: '360px', height: '202px', backgroundColor: '#000' }}
-                        />
+                                            <line x1={config.grid[0][3].x} y1={config.grid[0][3].y} x2={config.grid[0][2].x} y2={config.grid[0][2].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
+                                            <line x1={config.grid[0][3].x} y1={config.grid[0][3].y} x2={config.grid[1][3].x} y2={config.grid[1][3].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
 
-                        <svg
-                            className="absolute top-6 left-0 pointer-events-none"
-                            width="360"
-                            height="202"
-                            style={{ pointerEvents: 'none' }}
-                        >
-                            <g opacity={selectedProjector === 2 ? 1 : 0.3}>
-                                <polygon
-                                    points={warpPoints[2].map(p => `${p.x},${p.y}`).join(' ')}
-                                    fill="none"
-                                    stroke={selectedProjector === 2 ? '#f59e0b' : '#60a5fa'}
-                                    strokeWidth="2"
-                                    strokeDasharray={selectedProjector === 2 ? '8,4' : '0'}
-                                />
-                                {warpPoints[2].map((pt, ptIdx) => (
-                                    <g
-                                        key={ptIdx}
-                                        style={{ pointerEvents: 'auto', cursor: 'move' }}
-                                        onMouseDown={(e) => {
-                                            e.preventDefault();
-                                            const onMove = (m: MouseEvent) => {
-                                                updatePoint(2, ptIdx, { x: m.movementX, y: m.movementY });
-                                            };
-                                            const onUp = () => {
-                                                window.removeEventListener('mousemove', onMove);
-                                                window.removeEventListener('mouseup', onUp);
-                                            };
-                                            window.addEventListener('mousemove', onMove);
-                                            window.addEventListener('mouseup', onUp);
-                                        }}
-                                    >
-                                        <circle cx={pt.x} cy={pt.y} r="15" fill="transparent" className="hover:fill-amber-500/20" />
-                                        <circle cx={pt.x} cy={pt.y} r="6" fill="#f59e0b" stroke="#000" strokeWidth="2" />
-                                        <circle cx={pt.x} cy={pt.y} r="2" fill="#fff" />
-                                    </g>
-                                ))}
-                            </g>
-                        </svg>
-                    </div>
+                                            {/* Bottom Corners */}
+                                            <line x1={config.grid[3][0].x} y1={config.grid[3][0].y} x2={config.grid[3][1].x} y2={config.grid[3][1].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
+                                            <line x1={config.grid[3][0].x} y1={config.grid[3][0].y} x2={config.grid[2][0].x} y2={config.grid[2][0].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
+
+                                            <line x1={config.grid[3][3].x} y1={config.grid[3][3].y} x2={config.grid[3][2].x} y2={config.grid[3][2].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
+                                            <line x1={config.grid[3][3].x} y1={config.grid[3][3].y} x2={config.grid[2][3].x} y2={config.grid[2][3].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
+
+                                            {/* Draw Control Points (Corners + Handles) */}
+                                            {config.grid.map((row, r) => row.map((pt, c) => {
+                                                // Ignore internal points (rows 1-2, cols 1-2)
+                                                if (r > 0 && r < 3 && c > 0 && c < 3) return null;
+
+                                                const isCorner = (r === 0 || r === 3) && (c === 0 || c === 3);
+                                                const isSelected = selectedPoints.some(p => p.r === r && p.c === c);
+
+                                                return (
+                                                    <g
+                                                        key={`${r}-${c}`}
+                                                        style={{ cursor: isCorner ? 'move' : 'crosshair' }}
+                                                        onMouseDown={(e) => handleDragStart(i, r, c, e)}
+                                                    >
+                                                        <circle cx={pt.x} cy={pt.y} r="15" fill="transparent" />
+                                                        <circle
+                                                            cx={pt.x} cy={pt.y} r={isCorner ? 5 : 3}
+                                                            fill={isSelected ? '#fff' : (isCorner ? '#f59e0b' : '#60a5fa')}
+                                                            stroke="#000" strokeWidth="1"
+                                                        />
+                                                    </g>
+                                                )
+                                            }))}
+                                        </>
+                                    )}
+
+                                    {/* --- LINEAR (QUAD) VISUALIZATION --- */}
+                                    {config.mode === 'linear' && (
+                                        <>
+                                            <polygon
+                                                points={`${config.grid[0][0].x},${config.grid[0][0].y} ${config.grid[0][1].x},${config.grid[0][1].y} ${config.grid[1][1].x},${config.grid[1][1].y} ${config.grid[1][0].x},${config.grid[1][0].y}`}
+                                                fill="none" stroke="#f59e0b" strokeWidth="2" opacity="0.5"
+                                            />
+                                            {config.grid.map((row, r) => row.map((pt, c) => {
+                                                const isSelected = selectedPoints.some(p => p.r === r && p.c === c);
+                                                return (
+                                                    <g
+                                                        key={`${r}-${c}`}
+                                                        style={{ cursor: 'move' }}
+                                                        onMouseDown={(e) => handleDragStart(i, r, c, e)}
+                                                    >
+                                                        <circle cx={pt.x} cy={pt.y} r="15" fill="transparent" />
+                                                        <circle
+                                                            cx={pt.x} cy={pt.y} r="6"
+                                                            fill={isSelected ? '#fff' : '#f59e0b'}
+                                                            stroke="#000" strokeWidth="1"
+                                                        />
+                                                    </g>
+                                                )
+                                            }))}
+                                        </>
+                                    )}
+
+                                </g>
+                            </svg>
+                        </div>
+                    ))}
                 </div>
             </main>
         </div>
-    )
+    );
 }

@@ -24,6 +24,11 @@ export class ThreeRenderer {
             });
             renderer.setSize(this.width, this.height);
             renderer.setPixelRatio(window.devicePixelRatio);
+            // Optimization for high DPI screens to avoid lag
+            if (window.devicePixelRatio > 1) {
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            }
+
             container.appendChild(renderer.domElement);
             this.renderers.push(renderer);
 
@@ -81,7 +86,9 @@ export class ThreeRenderer {
     }
 
     public setVideo(video: HTMLVideoElement) {
-        console.log('[ThreeRenderer] Setting video...');
+        if (this.texture) this.texture.dispose();
+
+        console.log('[ThreeRenderer] Setting new video texture');
         this.texture = new THREE.VideoTexture(video);
         this.texture.colorSpace = THREE.SRGBColorSpace;
         this.texture.minFilter = THREE.LinearFilter;
@@ -92,7 +99,6 @@ export class ThreeRenderer {
             material.map = this.texture;
             material.needsUpdate = true;
         });
-        console.log('[ThreeRenderer] Video texture applied');
     }
 
     public updateWarping(index: number, points: { x: number; y: number }[]) {
@@ -101,27 +107,28 @@ export class ThreeRenderer {
         // Convert 4 Corner Points to 2x2 Grid for Interpolation
         // Input: [TL, TR, BR, BL] (Clockwise)
         // Grid needs: [[TL, TR], [BL, BR]]
-        // Note: Our points[3] is BL (Clockwise order: TL, TR, BR, BL) implies points[2] is BR.
-        // Wait, check DEFAULT_WARP order in App.tsx:
-        // 0:TL, 1:TR, 2:BR, 3:BL.
-        // So Grid Row 1 (Bottom) is [BL, BR] -> [points[3], points[2]].
-
         const grid = [
             [points[0], points[1]], // Top Row
             [points[3], points[2]]  // Bottom Row
         ];
 
-        this.updateGridWarp(index, grid, 2, 2);
+        this.updateGridWarp(index, grid, 2, 2, 'linear');
     }
 
-    public updateGridWarp(index: number, points: { x: number; y: number }[][], rows: number, cols: number) {
+    public updateGridWarp(
+        index: number,
+        points: { x: number; y: number }[][],
+        rows: number,
+        cols: number,
+        mode: 'linear' | 'bicubic' = 'bicubic'
+    ) {
         if (!this.meshes[index]) return;
 
         const mesh = this.meshes[index];
         const geometry = mesh.geometry;
         const positions = geometry.attributes.position;
 
-        const meshSegsX = 32; // Must match constructor
+        const meshSegsX = 32;
         const meshSegsY = 32;
 
         for (let iy = 0; iy <= meshSegsY; iy++) {
@@ -129,8 +136,8 @@ export class ThreeRenderer {
             for (let ix = 0; ix <= meshSegsX; ix++) {
                 const u = ix / meshSegsX; // 0..1
 
-                // Interpolate using Spline/Bilinear logic
-                const pos = WarpMath.interpolate(u, v, points, cols, rows);
+                // Interpolate using logic from WarpMath
+                const pos = WarpMath.interpolate(u, v, points, cols, rows, mode);
 
                 const idx = iy * (meshSegsX + 1) + ix;
                 positions.setXYZ(idx, pos.x, pos.y, 0);
@@ -150,7 +157,6 @@ export class ThreeRenderer {
         const uMin = crop.x;
         const uMax = crop.x + crop.width;
 
-        // V=1 is Top, V=0 is Bottom
         const vTop = 1 - crop.y;
         const vBottom = 1 - (crop.y + crop.height);
 
@@ -158,9 +164,7 @@ export class ThreeRenderer {
         const gridY = 32;
 
         for (let iy = 0; iy <= gridY; iy++) {
-            const vParam = iy / gridY; // 0 (top line) to 1 (bottom line)
-
-            // Interpolate V
+            const vParam = iy / gridY; // 0 (top) to 1 (bottom)
             const v = vTop + (vBottom - vTop) * vParam;
 
             for (let ix = 0; ix <= gridX; ix++) {
@@ -186,7 +190,9 @@ export class ThreeRenderer {
         if (this.animationId) cancelAnimationFrame(this.animationId);
 
         this.renderers.forEach(r => {
-            r.domElement.remove();
+            if (r.domElement.parentElement) {
+                r.domElement.parentElement.removeChild(r.domElement);
+            }
             r.dispose();
         });
 

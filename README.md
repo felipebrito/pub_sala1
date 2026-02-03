@@ -57,10 +57,33 @@ Mathematical helper library.
 
 ## Controls
 
-- **Projectors (Left Sidebar)**: Select P1, P2, or P3 to adjust settings.
-- **Warping**: Drag the orange corners on the projector preview to warp the output.
-- **Input Mapping**: Use the sliders in the sidebar to choose which part of the video this projector displays.
-- **Video Source**: Select from test videos or enter a custom URL.
+- **Projectors**: Select P1, P2, or P3.
+- **Warp Modes**: 
+  - **Quad**: Standard 4-corner perspective correction (Linear).
+  - **Bezier**: Advanced warping with control handles for curved surfaces (Bicubic).
+- **Interaction**:
+  - **Drag**: Move control points.
+  - **Shift/Ctrl + Click**: Select multiple points to move them together.
+- **Input Mapping**: Crop specific regions of the source video.
+
+## Roadmap & Changelog
+
+### ✅ Completed
+- [x] **Core Engine rewrite**: Transitioned to unified `ProjectorConfig` state.
+- [x] **High-Performance Mesh**: 32x32 vertex grid for smooth distortions.
+- [x] **Advanced Warping Modes**:
+  - **Linear (Quad)**: 2x2 Grid with straight edges.
+  - **Bicubic (Bezier)**: 4x4 Grid approximation with intelligent control handles.
+- [x] **Coons Patch Math**: Auto-calculation of internal surface points for perfect curves.
+- [x] **Enhanced UI/UX**:
+  - Multi-selection of points (Shift/Ctrl + Click).
+  - Visual feedback for handles vs corners.
+
+### 🚧 Upcoming / Planned
+- [ ] **Edge Blending**: Soft gradient masking for overlapping projectors.
+- [ ] **Custom Grid density**: Manual N x N grid controls.
+- [ ] **Preset Management**: Export/Import configurations to JSON.
+- [ ] **Masking**: Ability to draw black masks to hide unwanted areas.
 
 ## License
 
