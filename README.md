@@ -1,107 +1,67 @@
 # Lumina Mapper
 
-Professional multi-projector mapping application for **3x 1920x1080 outputs** with real-time warping and edge blending.
+**Web-based Video Mapping Software** built with React, Three.js, and Vite.
+Simulates a professional projection mapping workflow directly in the browser.
 
-![Lumina Mapper Interface](https://img.shields.io/badge/Status-Phase%201.1%20Complete-success)
-![Version](https://img.shields.io/badge/Version-0.1.0-blue)
+![Lumina Mapper](https://github.com/user-attachments/assets/placeholder.png)
 
-## 🎯 Features
+## Features
 
-### Phase 1: Control Interface ✅
-- **3 Independent Projector Canvases** - Side-by-side preview (360x202px each)
-- **Real-time Warping** - 4-corner mesh deformation per projector
-- **Interactive Handles** - Drag-and-drop corner adjustment
-- **Auto-save Warping** - LocalStorage persistence
-- **Projector Selection** - Quick switching between P1, P2, P3
+- **Multi-Projector Support**: Controls 3 independent projector outputs (Virtual Canvas).
+- **Advanced Warping**: 
+  - Quad-corner pinning for keystone correction.
+  - **High-Density Mesh Interpolation (32x32)**: Uses bicubic mathematical interpolation to prevent texture distortion (zig-zag artifacts) during heavy warping.
+- **Input Mapping (Slicing)**: 
+  - Dynamic input cropping per projector.
+  - Select specific regions of a source video (e.g., Left 1/3, Center 1/3) for each output.
+  - Adjustable X, Y, Width, and Height sliders.
+- **Video Reference**:
+  - Background "Ghost Video" reference (Optional) or clean output mode.
+  - Optimized VideoTexture handling via Three.js.
+  - Auto-play and loop management.
 
-### Phase 2: Output System (Planned)
-- Fullscreen multi-monitor output
-- Synchronized video playback across 3 projectors
-- UV mapping for seamless video distribution
-- Edge blending with adjustable overlap
-- BroadcastChannel sync
+## Technology Stack
 
-## 🚀 Quick Start
+- **Core**: React 18 + TypeScript + Vite
+- **3D Engine**: Three.js (WebGL)
+- **Styling**: Tailwind CSS
+- **Icons**: Lucide React
 
-```bash
-# Install dependencies
-npm install
+## Architecture
 
-# Run development server
-npm run dev
+### `ThreeRenderer.ts`
+The core rendering engine. Replaces standard DOM manipulation with a WebGL context.
+- Manages 3 parallel Three.js `Scenes` and `Renderers`.
+- Implements `VideoTexture` streaming.
+- **Warping Logic**: Directly manipulates the vertex positions of a high-density 32x32 `PlaneGeometry`. Uses `WarpMath.ts` to calculate smooth curves between control points.
+- **Input Mapping**: Manipulates UV coordinates of the mesh to "slice" the video texture.
 
-# Build for production
-npm run build
-```
+### `WarpMath.ts`
+Mathematical helper library.
+- Provides **Bilinear** and **Bicubic (Catmull-Rom)** interpolation algorithms to map sparse control points (e.g., 2x2 corners) to a dense mesh surface.
 
-Access the interface at **http://localhost:5173**
+## Getting Started
 
-## 🎨 Interface
+1. **Install Dependencies**
+   ```bash
+   npm install
+   ```
 
-- **Sidebar**: Projector selection (P1/P2/P3), tools, reset
-- **Main Viewport**: 3 monitors side-by-side with warping handles
-- **Corner Pins**: Clockwise order (TL → TR → BR → BL)
+2. **Run Development Server**
+   ```bash
+   npm run dev
+   ```
 
-## 🔧 Technical Stack
+3. **Open in Browser**
+   Interact with the UI at `http://localhost:5173`.
 
-- **PixiJS v7** - GPU-accelerated rendering
-- **React + TypeScript** - UI framework
-- **Vite** - Build tool
-- **Tailwind CSS** - Styling
+## Controls
 
-## 📐 Warping System
+- **Projectors (Left Sidebar)**: Select P1, P2, or P3 to adjust settings.
+- **Warping**: Drag the orange corners on the projector preview to warp the output.
+- **Input Mapping**: Use the sliders in the sidebar to choose which part of the video this projector displays.
+- **Video Source**: Select from test videos or enter a custom URL.
 
-Each projector has a **10x10 mesh grid** with bilinear interpolation. Corner pins:
-- **Point 0**: Top-Left
-- **Point 1**: Top-Right
-- **Point 2**: Bottom-Right
-- **Point 3**: Bottom-Left
+## License
 
-Warping data is automatically saved to `localStorage` and restored on page load.
-
-## 🗺️ Roadmap
-
-### Phase 1 (Current)
-- [x] Basic 3-monitor layout
-- [x] Corner pin warping
-- [x] Warping persistence
-- [ ] Video integration
-- [ ] Advanced editing tools
-
-### Phase 2 (Planned)
-- [ ] Fullscreen output windows
-- [ ] Multi-monitor positioning
-- [ ] Video synchronization
-- [ ] Edge blending
-
-### Advanced Features (Future)
-- [ ] Bezier curve warping
-- [ ] Variable grid density
-- [ ] Individual corner selection
-- [ ] Keyboard nudge (arrow keys)
-- [ ] Export/Import JSON configs
-
-## 📦 Project Structure
-
-```
-src/
-├── core/
-│   └── PixiRenderer.ts    # PixiJS rendering engine
-├── App.tsx                 # Main React component
-└── index.css              # Global styles
-```
-
-## 🎛️ Usage
-
-1. **Select Projector** - Click P1, P2, or P3 in sidebar
-2. **Adjust Corners** - Drag orange handles to warp
-3. **Reset** - Click "Reset All Warping" to restore defaults
-4. **Auto-save** - Changes persist automatically
-
-## 📄 License
-
-MIT License - Felipe Brito © 2026
-
----
-
-**Built for PUC Sala 1 - Professional Projection Mapping**
+MIT
