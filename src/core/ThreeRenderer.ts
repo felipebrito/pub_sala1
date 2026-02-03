@@ -1,62 +1,71 @@
 import * as THREE from 'three';
 import { WarpMath } from './WarpMath';
 
+export interface RendererTarget {
+    index: number;
+    container: HTMLElement;
+}
+
 export class ThreeRenderer {
-    private renderers: THREE.WebGLRenderer[] = [];
-    private scenes: THREE.Scene[] = [];
-    private cameras: THREE.OrthographicCamera[] = [];
-    private meshes: THREE.Mesh[] = [];
+    private renderers: (THREE.WebGLRenderer | null)[] = [null, null, null];
+    private scenes: (THREE.Scene | null)[] = [null, null, null];
+    private cameras: (THREE.OrthographicCamera | null)[] = [null, null, null];
+    private meshes: (THREE.Mesh | null)[] = [null, null, null];
+
     private texture: THREE.VideoTexture | null = null;
     private animationId: number | null = null;
 
-    // Display dimensions
-    private readonly width = 360;
-    private readonly height = 202;
+    // Display dimensions (Virtual Canvas Resolution)
+    // If fullscreen, we might want to adapt? 
+    // Usually mapping software keeps internal resolution fixed (e.g. 1920x1080) and scales CSS.
+    // Here we use fixed small resolution for preview (360x202) but for Output we might want full res?
+    // User requested "Fullscreen".
+    // If we use Fixed Resolution geometry, the "Warping" logic operates on that resolution.
+    // If output window is 1920x1080, we should render at that resolution or scale up?
+    // For now, let's keep the logic consistent: 
+    // The renderer uses clientWidth/clientHeight of the container. 
 
-    constructor(container1: HTMLElement, container2: HTMLElement, container3: HTMLElement) {
-        const containers = [container1, container2, container3];
+    constructor(targets: RendererTarget[]) {
+        targets.forEach(({ index, container }) => {
+            const width = container.clientWidth;
+            const height = container.clientHeight;
 
-        containers.forEach((container, i) => {
             // 1. Setup Renderer
             const renderer = new THREE.WebGLRenderer({
                 antialias: true,
                 alpha: true
             });
-            renderer.setSize(this.width, this.height);
+            renderer.setSize(width, height);
             renderer.setPixelRatio(window.devicePixelRatio);
-            // Optimization for high DPI screens to avoid lag
-            if (window.devicePixelRatio > 1) {
-                renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-            }
 
             container.appendChild(renderer.domElement);
-            this.renderers.push(renderer);
+            this.renderers[index] = renderer;
 
             // 2. Setup Scene
             const scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x1a1a1a);
-            this.scenes.push(scene);
+            scene.background = new THREE.Color(0x000000); // Black background for output
+            this.scenes[index] = scene;
 
             // 3. Setup Camera
             const camera = new THREE.OrthographicCamera(
-                0, this.width,
-                0, this.height,
+                0, width,
+                0, height,
                 0.1, 1000
             );
             camera.position.z = 10;
             camera.updateProjectionMatrix();
-            this.cameras.push(camera);
+            this.cameras[index] = camera;
 
             // 4. Create Warping Mesh (High Density 32x32)
             const gridX = 32;
             const gridY = 32;
-            const geometry = new THREE.PlaneGeometry(this.width, this.height, gridX, gridY);
+            const geometry = new THREE.PlaneGeometry(width, height, gridX, gridY);
 
             // Initial UV Mapping Logic (Slicing 1/3 per projector)
             const uvAttribute = geometry.attributes.uv;
             const sliceWidth = 1.0 / 3.0;
-            const uMin = i * sliceWidth;
-            const uMax = (i + 1) * sliceWidth;
+            const uMin = index * sliceWidth;
+            const uMax = (index + 1) * sliceWidth;
 
             for (let iy = 0; iy <= gridY; iy++) {
                 const v = 1 - (iy / gridY); // V goes 1..0
@@ -79,7 +88,20 @@ export class ThreeRenderer {
 
             const mesh = new THREE.Mesh(geometry, material);
             scene.add(mesh);
-            this.meshes.push(mesh);
+            this.meshes[index] = mesh;
+
+            // Resize handler for this specific container
+            const onResize = () => {
+                const w = container.clientWidth;
+                const h = container.clientHeight;
+                renderer.setSize(w, h);
+                camera.right = w;
+                camera.top = h;
+                camera.updateProjectionMatrix();
+                // Note: Geometry is NOT resized automatically, warping points are relative to absolute Resolution.
+                // If we resize window, we stretch the canvas.
+            };
+            window.addEventListener('resize', onResize);
         });
 
         this.animate();
@@ -95,24 +117,12 @@ export class ThreeRenderer {
         this.texture.magFilter = THREE.LinearFilter;
 
         this.meshes.forEach(mesh => {
-            const material = mesh.material as THREE.MeshBasicMaterial;
-            material.map = this.texture;
-            material.needsUpdate = true;
+            if (mesh) {
+                const material = mesh.material as THREE.MeshBasicMaterial;
+                material.map = this.texture;
+                material.needsUpdate = true;
+            }
         });
-    }
-
-    public updateWarping(index: number, points: { x: number; y: number }[]) {
-        if (!this.meshes[index]) return;
-
-        // Convert 4 Corner Points to 2x2 Grid for Interpolation
-        // Input: [TL, TR, BR, BL] (Clockwise)
-        // Grid needs: [[TL, TR], [BL, BR]]
-        const grid = [
-            [points[0], points[1]], // Top Row
-            [points[3], points[2]]  // Bottom Row
-        ];
-
-        this.updateGridWarp(index, grid, 2, 2, 'linear');
     }
 
     public updateGridWarp(
@@ -122,11 +132,39 @@ export class ThreeRenderer {
         cols: number,
         mode: 'linear' | 'bicubic' = 'bicubic'
     ) {
-        if (!this.meshes[index]) return;
-
         const mesh = this.meshes[index];
+        if (!mesh) return;
+
         const geometry = mesh.geometry;
         const positions = geometry.attributes.position;
+        const width = (geometry as any).parameters.width;
+        const height = (geometry as any).parameters.height;
+
+        // Scale factor: Points come in Preview coordinates (360x202).
+        // If we are in Output mode (FullHD), we must scale points up.
+        // HACK: We assume input points are normalized 0..1 relative to Preview (360x202),
+        // OR we just normalize them now.
+        // The points from App.tsx are PIXELS (0..360, 0..202).
+        // We need to map them to CURRENT Renderer Size.
+
+        // Let's normalize points based on PREVIEW_WIDTH/HEIGHT constants (360, 202)
+        // defined in the App logic, and remap to current geometry width/height.
+        const PREVIEW_WIDTH = 360;
+        const PREVIEW_HEIGHT = 202;
+
+        // However, for simplicity now, let's just pass the raw points to WarpMath 
+        // and hope WarpMath handles it?
+        // No, WarpMath.interpolate returns a coordinate in the same space as input points (Pixels).
+        // If mesh is 1920x1080 but points are 0..360, warping will be tiny in top left corner.
+
+        // FIX: Normalize points before passing to Interpolator?
+        // Or Normalize output of interpolate?
+        // Best: Normalize Control Points.
+
+        const normPoints = points.map(row => row.map(p => ({
+            x: p.x / PREVIEW_WIDTH,
+            y: p.y / PREVIEW_HEIGHT
+        })));
 
         const meshSegsX = 32;
         const meshSegsY = 32;
@@ -136,11 +174,12 @@ export class ThreeRenderer {
             for (let ix = 0; ix <= meshSegsX; ix++) {
                 const u = ix / meshSegsX; // 0..1
 
-                // Interpolate using logic from WarpMath
-                const pos = WarpMath.interpolate(u, v, points, cols, rows, mode);
+                // Interpolate using NORMALIZED coords (result is 0..1)
+                const posNorm = WarpMath.interpolate(u, v, normPoints, cols, rows, mode);
 
+                // Scale to actual mesh size
                 const idx = iy * (meshSegsX + 1) + ix;
-                positions.setXYZ(idx, pos.x, pos.y, 0);
+                positions.setXYZ(idx, posNorm.x * width, posNorm.y * height, 0);
             }
         }
 
@@ -148,9 +187,9 @@ export class ThreeRenderer {
     }
 
     public updateInputCrop(index: number, crop: { x: number, y: number, width: number, height: number }) {
-        if (!this.meshes[index]) return;
-
         const mesh = this.meshes[index];
+        if (!mesh) return;
+
         const geometry = mesh.geometry;
         const uvAttribute = geometry.attributes.uv;
 
@@ -182,7 +221,9 @@ export class ThreeRenderer {
     private animate = () => {
         this.animationId = requestAnimationFrame(this.animate);
         for (let i = 0; i < 3; i++) {
-            this.renderers[i].render(this.scenes[i], this.cameras[i]);
+            if (this.renderers[i] && this.scenes[i] && this.cameras[i]) {
+                this.renderers[i]!.render(this.scenes[i]!, this.cameras[i]!);
+            }
         }
     }
 
@@ -190,21 +231,21 @@ export class ThreeRenderer {
         if (this.animationId) cancelAnimationFrame(this.animationId);
 
         this.renderers.forEach(r => {
-            if (r.domElement.parentElement) {
+            if (r?.domElement.parentElement) {
                 r.domElement.parentElement.removeChild(r.domElement);
             }
-            r.dispose();
+            r?.dispose();
         });
 
         if (this.texture) this.texture.dispose();
 
         this.meshes.forEach(m => {
-            m.geometry.dispose();
-            (m.material as THREE.Material).dispose();
+            m?.geometry.dispose();
+            (m?.material as THREE.Material)?.dispose();
         });
 
-        this.renderers = [];
-        this.scenes = [];
-        this.meshes = [];
+        this.renderers = [null, null, null];
+        this.scenes = [null, null, null];
+        this.meshes = [null, null, null];
     }
 }

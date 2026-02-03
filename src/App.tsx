@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ThreeRenderer } from './core/ThreeRenderer'
 import { TEST_VIDEOS } from './constants/videos';
-import { Play, Pause, Grid3X3, MousePointer2 } from 'lucide-react'
+import { Play, Pause, Grid3X3, MousePointer2, ExternalLink } from 'lucide-react'
 
 // Types
 interface Point { x: number; y: number }
@@ -92,7 +92,67 @@ const DEFAULT_CONFIGS = (): ProjectorConfig[] => [0, 1, 2].map(i => ({
     }
 }));
 
+const OutputWindow = ({ index }: { index: number }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const videoRef = useRef<HTMLVideoElement>(null);
+    const rendererRef = useRef<ThreeRenderer | null>(null);
+
+    useEffect(() => {
+        if (!containerRef.current) return;
+
+        let timeout: any;
+        const onMove = () => {
+            document.body.style.cursor = 'default';
+            clearTimeout(timeout);
+            timeout = setTimeout(() => document.body.style.cursor = 'none', 3000);
+        };
+        window.addEventListener('mousemove', onMove);
+
+        const r = new ThreeRenderer([{ index, container: containerRef.current }]);
+        rendererRef.current = r;
+
+        const sync = () => {
+            const str = localStorage.getItem('lumina-config-v3');
+            if (str) {
+                const configs: ProjectorConfig[] = JSON.parse(str);
+                const conf = configs[index];
+                if (conf) {
+                    r.updateInputCrop(index, conf.crop);
+                    r.updateGridWarp(index, conf.grid, conf.rows, conf.cols, conf.mode);
+                }
+            }
+            const vUrl = localStorage.getItem('lumina-video-url');
+            if (vUrl && videoRef.current && videoRef.current.src !== vUrl) {
+                videoRef.current.src = vUrl;
+                videoRef.current.play().catch(() => { });
+                r.setVideo(videoRef.current);
+            }
+        };
+
+        sync();
+        window.addEventListener('storage', sync);
+
+        return () => {
+            r.dispose();
+            window.removeEventListener('storage', sync);
+            window.removeEventListener('mousemove', onMove);
+        }
+    }, [index]);
+
+    return (
+        <div ref={containerRef} className="w-screen h-screen bg-black overflow-hidden relative">
+            <video ref={videoRef} className="hidden" crossOrigin="anonymous" loop muted playsInline autoPlay />
+            <div className="absolute top-4 left-4 text-white/50 text-xs font-mono opacity-50 select-none z-50 mix-blend-difference pointer-events-none">
+                OUTPUT {index + 1}
+            </div>
+        </div>
+    );
+};
+
 export default function App() {
+    const params = new URLSearchParams(window.location.search);
+    const outIdx = params.get('output');
+    if (outIdx !== null) return <OutputWindow index={parseInt(outIdx)} />;
     // --- State ---
     const loadConfig = (): ProjectorConfig[] => {
         try {
@@ -125,11 +185,11 @@ export default function App() {
     // 1. Initialize Renderer
     useEffect(() => {
         if (containerRefs[0].current && containerRefs[1].current && containerRefs[2].current && !rendererRef.current) {
-            rendererRef.current = new ThreeRenderer(
-                containerRefs[0].current,
-                containerRefs[1].current,
-                containerRefs[2].current
-            );
+            rendererRef.current = new ThreeRenderer([
+                { index: 0, container: containerRefs[0].current! },
+                { index: 1, container: containerRefs[1].current! },
+                { index: 2, container: containerRefs[2].current! }
+            ]);
 
             // Initial Push
             projectors.forEach((proj, i) => {
@@ -333,7 +393,19 @@ export default function App() {
                                 : 'hover:bg-white/5'
                                 }`}
                         >
-                            {i === 0 ? 'P1 (Left)' : i === 1 ? 'P2 (Center)' : 'P3 (Right)'}
+                            <div className="flex justify-between items-center w-full">
+                                <span>{i === 0 ? 'P1 (Left)' : i === 1 ? 'P2 (Center)' : 'P3 (Right)'}</span>
+                                <div
+                                    className="p-1.5 hover:bg-white/20 rounded cursor-pointer text-slate-400 hover:text-white"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        window.open(`/?output=${i}`, `P${i + 1}`, 'width=1280,height=720,menubar=no,toolbar=no,location=no,status=no');
+                                    }}
+                                    title="Open Output Window"
+                                >
+                                    <ExternalLink size={14} />
+                                </div>
+                            </div>
                         </button>
                     ))}
                 </div>
@@ -347,8 +419,8 @@ export default function App() {
                                 key={mode}
                                 onClick={() => setMode(mode)}
                                 className={`flex-1 py-1.5 text-xs uppercase font-bold rounded ${projectors[selectedProjector].mode === mode
-                                        ? 'bg-amber-500 text-black shadow'
-                                        : 'text-slate-500 hover:text-slate-300'
+                                    ? 'bg-amber-500 text-black shadow'
+                                    : 'text-slate-500 hover:text-slate-300'
                                     }`}
                             >
                                 {mode === 'linear' ? 'Quad' : 'Bezier'}
@@ -406,7 +478,7 @@ export default function App() {
                         onClick={togglePlayback}
                         disabled={!videoUrl}
                         className={`w-full px-4 py-2 rounded-lg text-sm flex items-center justify-center gap-2 ${!videoUrl ? 'bg-slate-800 text-slate-600' :
-                                isPlaying ? 'bg-amber-600 hover:bg-amber-500' : 'bg-green-600 hover:bg-green-500'
+                            isPlaying ? 'bg-amber-600 hover:bg-amber-500' : 'bg-green-600 hover:bg-green-500'
                             }`}
                     >
                         {isPlaying ? <Pause size={16} /> : <Play size={16} />}
