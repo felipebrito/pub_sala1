@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { PixiRenderer } from './core/PixiRenderer'
+import { TEST_VIDEOS } from './constants/videos';
 import { Play, Pause } from 'lucide-react'
 
 interface Point { x: number; y: number }
@@ -13,7 +14,17 @@ const DEFAULT_WARP = (): Point[] => [
 ];
 
 export default function App() {
+    // Load saved video URL from localStorage
+    const loadVideoUrl = (): string => {
+        try {
+            return localStorage.getItem('lumina-video-url') || '';
+        } catch (e) {
+            return '';
+        }
+    };
+
     const [isPlaying, setIsPlaying] = useState(false);
+    const [videoUrl, setVideoUrl] = useState(loadVideoUrl);
 
     // Load saved warping from localStorage or use defaults
     const loadWarpPoints = (): Point[][] => {
@@ -51,6 +62,17 @@ export default function App() {
         };
     }, []);
 
+    // Auto-save video URL to localStorage
+    useEffect(() => {
+        try {
+            if (videoUrl) {
+                localStorage.setItem('lumina-video-url', videoUrl);
+            }
+        } catch (e) {
+            console.error('Failed to save video URL:', e);
+        }
+    }, [videoUrl]);
+
     // Auto-save warping to localStorage whenever it changes
     useEffect(() => {
         try {
@@ -65,6 +87,28 @@ export default function App() {
             warpPoints.forEach((points, i) => rendererRef.current?.updateWarping(i, points));
         }
     }, [warpPoints]);
+
+    // Load and apply video when URL changes
+    useEffect(() => {
+        if (!videoUrl || !videoRef.current || !rendererRef.current) return;
+
+        const video = videoRef.current;
+        video.src = videoUrl;
+        video.loop = true;
+        video.muted = true; // Auto-play requires muted
+        video.crossOrigin = 'anonymous';
+
+        video.addEventListener('loadeddata', () => {
+            if (rendererRef.current) {
+                rendererRef.current.setVideo(video);
+            }
+        });
+
+        return () => {
+            video.pause();
+            video.src = '';
+        };
+    }, [videoUrl]);
 
     const updatePoint = useCallback((projIdx: number, pointIdx: number, delta: Point) => {
         setWarpPoints(prev => {
@@ -82,8 +126,29 @@ export default function App() {
         setWarpPoints([DEFAULT_WARP(), DEFAULT_WARP(), DEFAULT_WARP()]);
     };
 
+    const togglePlayback = () => {
+        if (!videoRef.current) return;
+
+        if (isPlaying) {
+            videoRef.current.pause();
+        } else {
+            videoRef.current.play();
+        }
+        setIsPlaying(!isPlaying);
+    };
+
+    const loadVideo = () => {
+        const url = prompt('Enter video URL (direct link to mp4, webm, etc):');
+        if (url) {
+            setVideoUrl(url);
+        }
+    };
+
     return (
         <div className="flex h-screen bg-[#0a0e1a] text-slate-300">
+            {/* Hidden video element */}
+            <video ref={videoRef} style={{ display: 'none' }} playsInline />
+
             {/* Sidebar */}
             <aside className="w-64 bg-[#0f1419] border-r border-white/10 p-6 flex flex-col gap-6">
                 <div>
@@ -108,6 +173,33 @@ export default function App() {
                 </div>
 
                 <div>
+                    <h2 className="text-xs font-bold text-slate-500 uppercase mb-3">Video</h2>
+                    <select
+                        value={videoUrl}
+                        onChange={(e) => setVideoUrl(e.target.value)}
+                        className="w-full bg-slate-800 text-white px-3 py-2 rounded-lg text-sm mb-2 border border-slate-700 hover:border-slate-600 focus:border-blue-500 focus:outline-none"
+                    >
+                        <option value="">Select test video...</option>
+                        {TEST_VIDEOS.map((video, i) => (
+                            <option key={i} value={video.url}>
+                                {video.title}
+                            </option>
+                        ))}
+                    </select>
+                    {videoUrl && (
+                        <div className="text-xs text-slate-500 mb-2">
+                            {TEST_VIDEOS.find(v => v.url === videoUrl)?.description || 'Custom URL'}
+                        </div>
+                    )}
+                    <button
+                        onClick={loadVideo}
+                        className="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg transition-colors text-sm mb-2"
+                    >
+                        Custom URL...
+                    </button>
+                </div>
+
+                <div>
                     <h2 className="text-xs font-bold text-slate-500 uppercase mb-3">Tools</h2>
                     <button
                         onClick={resetWarping}
@@ -115,6 +207,11 @@ export default function App() {
                     >
                         Reset All Warping
                     </button>
+                    {videoUrl && (
+                        <div className="mt-3 text-xs text-slate-500 break-all">
+                            Video: {videoUrl.substring(0, 40)}...
+                        </div>
+                    )}
                 </div>
 
                 <div className="mt-auto">

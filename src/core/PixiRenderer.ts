@@ -55,10 +55,16 @@ export class PixiRenderer {
     }
 
     public setVideo(video: HTMLVideoElement) {
-        const videoTexture = PIXI.Texture.from(video);
+        const baseTexture = PIXI.BaseTexture.from(video, {
+            resourceOptions: {
+                autoPlay: false,
+            }
+        });
+        const videoTexture = new PIXI.Texture(baseTexture);
 
         this.meshes.forEach((mesh, i) => {
             mesh.texture = videoTexture;
+            mesh.tint = 0xFFFFFF; // Remove gray tint when video is loaded
 
             // UV mapping: each monitor sees 1/3 of the video
             // P1: 0-0.33, P2: 0.33-0.66, P3: 0.66-1.0
@@ -73,6 +79,15 @@ export class PixiRenderer {
                 uvs[j] = uStart + u * (uEnd - uStart);
             }
             buffer.update();
+        });
+
+        // Update video texture on each frame
+        this.apps.forEach(app => {
+            app.ticker.add(() => {
+                if (baseTexture.valid) {
+                    baseTexture.update();
+                }
+            });
         });
     }
 
