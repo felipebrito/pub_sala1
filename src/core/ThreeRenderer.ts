@@ -338,43 +338,91 @@ export class ThreeRenderer {
     }
 
     /**
-     * Efficiently samples a row of pixels DIRECTLY from the source video element.
-     * This avoids WebGL readback overhead and ignores warping/cropping.
-     * @param type 'idle' or 'main'
-     * @param count number of pixels to sample
-     * @param yNorm normalized Y position (0 = top, 1 = bottom)
+     * Samples a specific row of pixels directly from source videos with high-quality averaging.
+     * Use this to get the "Clean" signal without warp/crop distortion.
+     * @param count Target pixel count (usually 180 for LEDs)
+     * @param lineIndex 1-based line number (e.g., 1 to 1081)
+     * @param mix Crossfade value (0 = Idle, 1 = Main)
      */
-    public sampleVideo(type: 'idle' | 'main', count: number, yNorm: number): Uint8Array | null {
-        const video = type === 'idle' ? this.videoA : this.videoB;
-        if (!video || video.readyState < 2 || !this.samplingCtx) return null;
+    public sampleMixedSource(count: number, lineIndex: number, mix: number): Uint8Array | null {
+        if (!this.samplingCtx) return null;
 
-        const w = video.videoWidth;
-        const h = video.videoHeight;
-        if (w === 0 || h === 0) return null;
-
-        // Resize sampling canvas to match video width (minimum required for a row)
-        if (this.samplingCanvas.width !== w) {
-            this.samplingCanvas.width = w;
+        // Ensure sampling canvas is exactly the target width for averaging
+        if (this.samplingCanvas.width !== count) {
+            this.samplingCanvas.width = count;
             this.samplingCanvas.height = 1;
         }
 
-        const y = Math.floor(yNorm * h);
+        this.samplingCtx.clearRect(0, 0, count, 1);
+        this.samplingCtx.imageSmoothingEnabled = true;
+        this.samplingCtx.imageSmoothingQuality = 'high';
 
-        // Draw exactly one row from the video to our 1-pixel high canvas
-        this.samplingCtx.drawImage(video, 0, y, w, 1, 0, 0, w, 1);
-
-        const rowData = this.samplingCtx.getImageData(0, 0, w, 1).data;
-        const result = new Uint8Array(count * 3);
-        const step = w / count;
-
-        for (let i = 0; i < count; i++) {
-            const sampleX = Math.floor(i * step);
-            const sourceIdx = sampleX * 4;
-            result[i * 3] = rowData[sourceIdx];
-            result[i * 3 + 1] = rowData[sourceIdx + 1];
-            result[i * 3 + 2] = rowData[sourceIdx + 2];
+        // Draw Video A (Idle)
+        if (this.videoA && this.videoA.readyState >= 2 && mix < 1.0) {
+            const y = Math.min(Math.max(0, lineIndex - 1), this.videoA.videoHeight - 1);
+            this.samplingCtx.globalAlpha = 1.0 - mix;
+            this.samplingCtx.drawImage(
+                this.videoA,
+                0, y, this.videoA.videoWidth, 1, // Source: whole row
+                0, 0, count, 1                   // Target: 180px row (averaging happens here)
+            );
         }
 
+        // Draw Video B (Main)
+        if (this.videoB && this.videoB.readyState >= 2 && mix > 0.0) {
+            const y = Math.min(Math.max(0, lineIndex - 1), this.videoB.videoHeight - 1);
+            // Three.js crossfade usually uses additive/alpha blending logic
+            this.samplingCtx.globalAlpha = mix;
+            this.samplingCtx.globalCompositeOperation = 'lighter'; // Additive blend for crossfade
+            this.samplingCtx.drawImage(
+                this.videoB,
+                0, y, this.videoB.videoWidth, 1,
+                0, 0, count, 1
+            );
+            this.samplingCtx.globalCompositeOperation = 'source-over';
+        }
+
+        this.samplingCtx.globalAlpha = 1.0;
+
+        const rowData = this.samplingCtx.getImageData(0, 0, count, 1).data;
+        const result = new Uint8Array(count * 3);
+
+        for (let i = 0; i < count; i++) {
+            const idx = i * 4;
+            result[i * 3] = rowData[idx];
+            result[i * 3 + 1] = rowData[idx + 1];
+            result[i * 3 + 2] = rowData[idx + 2];
+        }
+
+        return result;
+    }
+
+    /**
+     * Samples a specific row of pixels from a single video source.
+     */
+    public sampleVideo(type: 'idle' | 'main', count: number, lineIndex: number): Uint8Array | null {
+        const video = type === 'idle' ? this.videoA : this.videoB;
+        if (!video || video.readyState < 2 || !this.samplingCtx) return null;
+
+        if (this.samplingCanvas.width !== count) {
+            this.samplingCanvas.width = count;
+            this.samplingCanvas.height = 1;
+        }
+
+        this.samplingCtx.imageSmoothingEnabled = true;
+        this.samplingCtx.imageSmoothingQuality = 'high';
+
+        const y = Math.min(Math.max(0, lineIndex - 1), video.videoHeight - 1);
+        this.samplingCtx.drawImage(video, 0, y, video.videoWidth, 1, 0, 0, count, 1);
+
+        const rowData = this.samplingCtx.getImageData(0, 0, count, 1).data;
+        const result = new Uint8Array(count * 3);
+        for (let i = 0; i < count; i++) {
+            const idx = i * 4;
+            result[i * 3] = rowData[idx];
+            result[i * 3 + 1] = rowData[idx + 1];
+            result[i * 3 + 2] = rowData[idx + 2];
+        }
         return result;
     }
 

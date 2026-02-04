@@ -404,7 +404,7 @@ export default function App() {
     const [mixValue, setMixValue] = useState(0); // 0 = Idle, 1 = Main
     const [isLedBroadcastEnabled, setIsLedBroadcastEnabled] = useState(false);
     const [ledSampleMethod, setLedSampleMethod] = useState<'OUTPUT' | 'VIDEO'>('OUTPUT');
-    const [ledDataRowY, setLedDataRowY] = useState(0.99); // Default to near bottom
+    const [ledDataRowLine, setLedDataRowLine] = useState(1081); // Default to last line
     const [ledPreviewData, setLedPreviewData] = useState<Uint8Array | null>(null);
 
     // LED Bridge
@@ -645,11 +645,12 @@ export default function App() {
                     let pixelData: Uint8Array | null = null;
 
                     if (ledSampleMethod === 'OUTPUT') {
-                        // Sample from the first projector (main content area)
-                        pixelData = rendererRef.current.samplePixels(0, 180);
+                        // Sample from MIXED source (Clean video signal, but includes Idle+Main crossfade)
+                        // This ignores warp/crop but follows the crossfade logic
+                        pixelData = rendererRef.current.sampleMixedSource(180, ledDataRowLine, mixValue);
                     } else {
-                        // Sample directly from the Main Video texture
-                        pixelData = rendererRef.current.sampleVideo('main', 180, ledDataRowY);
+                        // Sample directly from the Main Video texture specifically
+                        pixelData = rendererRef.current.sampleVideo('main', 180, ledDataRowLine);
                     }
 
                     if (pixelData) {
@@ -664,7 +665,7 @@ export default function App() {
 
         rafId = requestAnimationFrame(sampleAndSend);
         return () => cancelAnimationFrame(rafId);
-    }, [isLedBroadcastEnabled, isLedBridgeConnected, ledSampleMethod, ledDataRowY, sendLedData]);
+    }, [isLedBroadcastEnabled, isLedBridgeConnected, ledSampleMethod, ledDataRowLine, mixValue, sendLedData]);
 
     // --- Logic ---
 
@@ -946,7 +947,7 @@ export default function App() {
                                         onClick={() => setLedSampleMethod(m)}
                                         className={`flex-1 py-1 text-[9px] rounded transition-all ${ledSampleMethod === m ? 'bg-amber-500 text-black font-bold' : 'text-slate-500 hover:text-white'}`}
                                     >
-                                        {m === 'OUTPUT' ? 'Output' : 'Data Row'}
+                                        {m === 'OUTPUT' ? 'Mixed (Clean)' : 'Main Only'}
                                     </button>
                                 ))}
                             </div>
@@ -955,15 +956,18 @@ export default function App() {
                         {ledSampleMethod === 'VIDEO' && (
                             <div className="space-y-2 pt-1 border-t border-white/5">
                                 <div className="flex justify-between text-[9px] uppercase">
-                                    <span className="text-slate-500">Row Pos</span>
-                                    <span className="text-amber-500 font-mono">{Math.round(ledDataRowY * 100)}%</span>
+                                    <span className="text-slate-500">Target Line (1-1081)</span>
+                                    <span className="text-amber-500 font-mono">#{ledDataRowLine}</span>
                                 </div>
                                 <input
-                                    type="range" min="0" max="1" step="0.001"
-                                    value={ledDataRowY}
-                                    onChange={(e) => setLedDataRowY(parseFloat(e.target.value))}
+                                    type="range" min="1" max="1081" step="1"
+                                    value={ledDataRowLine}
+                                    onChange={(e) => setLedDataRowLine(parseInt(e.target.value))}
                                     className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
                                 />
+                                <div className="text-[8px] text-slate-600 italic leading-tight">
+                                    * Real-time 1920px → 180px average filtering.
+                                </div>
                             </div>
                         )}
                     </div>
@@ -1430,7 +1434,7 @@ export default function App() {
                         )}
                     </div>
                     <div className="text-[9px] text-slate-600 font-mono">
-                        {ledSampleMethod === 'VIDEO' ? `Sampling Video Data Row at ${Math.round(ledDataRowY * 100)}%` : 'Sampling Main Output (Projector 1)'}
+                        {ledSampleMethod === 'VIDEO' ? `Sampling Main Video Line #${ledDataRowLine}` : `Sampling Mixed Signal Line #${ledDataRowLine}`}
                     </div>
                 </div>
             </main >
