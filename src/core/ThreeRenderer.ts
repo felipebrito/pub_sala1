@@ -347,7 +347,6 @@ export class ThreeRenderer {
     public sampleMixedSource(count: number, lineIndex: number, mix: number): Uint8Array | null {
         if (!this.samplingCtx) return null;
 
-        // Ensure sampling canvas is exactly the target width for averaging
         if (this.samplingCanvas.width !== count) {
             this.samplingCanvas.width = count;
             this.samplingCanvas.height = 1;
@@ -357,48 +356,40 @@ export class ThreeRenderer {
         this.samplingCtx.imageSmoothingEnabled = true;
         this.samplingCtx.imageSmoothingQuality = 'high';
 
+        const windowHeight = 10;
+
         // Draw Video A (Idle)
         if (this.videoA && this.videoA.readyState >= 2 && mix < 1.0) {
-            const y = Math.min(Math.max(0, lineIndex - 1), this.videoA.videoHeight - 1);
+            const h = this.videoA.videoHeight;
+            const y = Math.min(Math.max(0, lineIndex - 5), h - windowHeight);
             this.samplingCtx.globalAlpha = 1.0 - mix;
             this.samplingCtx.drawImage(
                 this.videoA,
-                0, y, this.videoA.videoWidth, 1, // Source: whole row
-                0, 0, count, 1                   // Target: 180px row (averaging happens here)
+                0, y, this.videoA.videoWidth, windowHeight,
+                0, 0, count, 1
             );
         }
 
         // Draw Video B (Main)
         if (this.videoB && this.videoB.readyState >= 2 && mix > 0.0) {
-            const y = Math.min(Math.max(0, lineIndex - 1), this.videoB.videoHeight - 1);
-            // Three.js crossfade usually uses additive/alpha blending logic
+            const h = this.videoB.videoHeight;
+            const y = Math.min(Math.max(0, lineIndex - 5), h - windowHeight);
             this.samplingCtx.globalAlpha = mix;
-            this.samplingCtx.globalCompositeOperation = 'lighter'; // Additive blend for crossfade
+            this.samplingCtx.globalCompositeOperation = 'lighter';
             this.samplingCtx.drawImage(
                 this.videoB,
-                0, y, this.videoB.videoWidth, 1,
+                0, y, this.videoB.videoWidth, windowHeight,
                 0, 0, count, 1
             );
             this.samplingCtx.globalCompositeOperation = 'source-over';
         }
 
         this.samplingCtx.globalAlpha = 1.0;
-
-        const rowData = this.samplingCtx.getImageData(0, 0, count, 1).data;
-        const result = new Uint8Array(count * 3);
-
-        for (let i = 0; i < count; i++) {
-            const idx = i * 4;
-            result[i * 3] = rowData[idx];
-            result[i * 3 + 1] = rowData[idx + 1];
-            result[i * 3 + 2] = rowData[idx + 2];
-        }
-
-        return result;
+        return this._pixelDataFromCanvas(count);
     }
 
     /**
-     * Samples a specific row of pixels from a single video source.
+     * Samples a specific row of pixels from a single video source with averaging.
      */
     public sampleVideo(type: 'idle' | 'main', count: number, lineIndex: number): Uint8Array | null {
         const video = type === 'idle' ? this.videoA : this.videoB;
@@ -409,13 +400,19 @@ export class ThreeRenderer {
             this.samplingCanvas.height = 1;
         }
 
+        this.samplingCtx.clearRect(0, 0, count, 1);
         this.samplingCtx.imageSmoothingEnabled = true;
         this.samplingCtx.imageSmoothingQuality = 'high';
 
-        const y = Math.min(Math.max(0, lineIndex - 1), video.videoHeight - 1);
-        this.samplingCtx.drawImage(video, 0, y, video.videoWidth, 1, 0, 0, count, 1);
+        const windowHeight = 10;
+        const y = Math.min(Math.max(0, lineIndex - 5), video.videoHeight - windowHeight);
 
-        const rowData = this.samplingCtx.getImageData(0, 0, count, 1).data;
+        this.samplingCtx.drawImage(video, 0, y, video.videoWidth, windowHeight, 0, 0, count, 1);
+        return this._pixelDataFromCanvas(count);
+    }
+
+    private _pixelDataFromCanvas(count: number): Uint8Array {
+        const rowData = this.samplingCtx!.getImageData(0, 0, count, 1).data;
         const result = new Uint8Array(count * 3);
         for (let i = 0; i < count; i++) {
             const idx = i * 4;

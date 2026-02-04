@@ -406,6 +406,7 @@ export default function App() {
     const [ledSampleMethod, setLedSampleMethod] = useState<'OUTPUT' | 'VIDEO'>('OUTPUT');
     const [ledDataRowLine, setLedDataRowLine] = useState(1081); // Default to last line
     const [ledPreviewData, setLedPreviewData] = useState<Uint8Array | null>(null);
+    const [isLedFlipped, setIsLedFlipped] = useState(false);
 
     // LED Bridge
     const { isConnected: isLedBridgeConnected, sendData: sendLedData } = useLedBridge();
@@ -654,6 +655,20 @@ export default function App() {
                     }
 
                     if (pixelData) {
+                        // Flip data if needed (for reverse-wired LED strips)
+                        if (isLedFlipped) {
+                            const flipped = new Uint8Array(pixelData.length);
+                            const count = pixelData.length / 3;
+                            for (let i = 0; i < count; i++) {
+                                const src = (count - 1 - i) * 3;
+                                const dst = i * 3;
+                                flipped[dst] = pixelData[src];
+                                flipped[dst + 1] = pixelData[src + 1];
+                                flipped[dst + 2] = pixelData[src + 2];
+                            }
+                            pixelData = flipped;
+                        }
+
                         sendLedData(pixelData);
                         setLedPreviewData(pixelData);
                     }
@@ -665,7 +680,7 @@ export default function App() {
 
         rafId = requestAnimationFrame(sampleAndSend);
         return () => cancelAnimationFrame(rafId);
-    }, [isLedBroadcastEnabled, isLedBridgeConnected, ledSampleMethod, ledDataRowLine, mixValue, sendLedData]);
+    }, [isLedBroadcastEnabled, isLedBridgeConnected, ledSampleMethod, ledDataRowLine, mixValue, isLedFlipped, sendLedData]);
 
     // --- Logic ---
 
@@ -965,8 +980,16 @@ export default function App() {
                                     onChange={(e) => setLedDataRowLine(parseInt(e.target.value))}
                                     className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
                                 />
-                                <div className="text-[8px] text-slate-600 italic leading-tight">
-                                    * Real-time 1920px → 180px average filtering.
+                                <div className="flex items-center justify-between pt-1">
+                                    <div className="text-[8px] text-slate-600 italic leading-tight flex-1">
+                                        * Real-time 1920px → 180px average filtering (10px window).
+                                    </div>
+                                    <button
+                                        onClick={() => setIsLedFlipped(!isLedFlipped)}
+                                        className={`px-2 py-0.5 rounded text-[8px] font-bold border ${isLedFlipped ? 'bg-amber-500/10 border-amber-500/50 text-amber-500' : 'border-white/10 text-white/30 hover:bg-white/5'}`}
+                                    >
+                                        REVERSE ORDER
+                                    </button>
                                 </div>
                             </div>
                         )}
@@ -1399,6 +1422,18 @@ export default function App() {
                                                 );
                                             }))}
                                         </g>
+
+                                        {/* LED Sampling Indicator Line - Global across all projectors */}
+                                        {isLedBroadcastEnabled && (
+                                            <line
+                                                x1="-50" y1={(ledDataRowLine / 1081) * 202}
+                                                x2="410" y2={(ledDataRowLine / 1081) * 202}
+                                                stroke="#3b82f6"
+                                                strokeWidth="2"
+                                                strokeDasharray="4 2"
+                                                className="drop-shadow-[0_0_8px_rgba(59,130,246,1)] pointer-events-none"
+                                            />
+                                        )}
                                     </g>
                                 </svg>
                             </div>
