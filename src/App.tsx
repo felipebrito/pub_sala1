@@ -416,12 +416,23 @@ export default function App() {
         const handleCanPlay = () => {
             if (video.videoWidth === 0) return;
             rendererRef.current?.setVideo(video);
+            if (playbackState === 'IDLE') {
+                video.loop = true;
+            } else {
+                video.loop = false;
+            }
             video.play().then(() => setIsPlaying(true)).catch(console.error);
         };
 
         video.addEventListener('canplay', handleCanPlay);
         return () => video.removeEventListener('canplay', handleCanPlay);
-    }, [videoUrl]);
+    }, [videoUrl, playbackState]);
+
+    // Helper to play a video
+    const playVideo = (url: string, state: 'IDLE' | 'MAIN') => {
+        setVideoUrl(url);
+        setPlaybackState(state);
+    };
 
     // --- Logic ---
 
@@ -833,15 +844,7 @@ export default function App() {
                             onChange={(e) => {
                                 if (e.target.value) {
                                     setIdleVideoUrl(e.target.value);
-                                    setVideoUrl(e.target.value);
-                                    setPlaybackState('IDLE');
-                                    setTimeout(() => {
-                                        if (videoRef.current) {
-                                            videoRef.current.loop = true;
-                                            videoRef.current.play().catch(() => { });
-                                            setIsPlaying(true);
-                                        }
-                                    }, 100);
+                                    playVideo(e.target.value, 'IDLE');
                                 }
                             }}
                             className="w-full bg-slate-800 text-white px-2 py-1 rounded text-xs border border-slate-700 hover:border-slate-600"
@@ -863,15 +866,7 @@ export default function App() {
                                     if (e.target.files?.[0]) {
                                         const url = URL.createObjectURL(e.target.files[0]);
                                         setIdleVideoUrl(url);
-                                        setVideoUrl(url);
-                                        setPlaybackState('IDLE');
-                                        setTimeout(() => {
-                                            if (videoRef.current) {
-                                                videoRef.current.loop = true;
-                                                videoRef.current.play().catch(() => { });
-                                                setIsPlaying(true);
-                                            }
-                                        }, 100);
+                                        playVideo(url, 'IDLE');
                                     }
                                 }}
                             />
@@ -923,18 +918,10 @@ export default function App() {
                         <div className="flex gap-2 mb-2">
                             <button
                                 onClick={() => {
-                                    // Trigger Main Video
                                     if (!mainVideoUrl) return alert('No Main Video selected');
-                                    setVideoUrl(mainVideoUrl);
-                                    setPlaybackState('MAIN');
-                                    setTimeout(() => {
-                                        if (videoRef.current) {
-                                            videoRef.current.loop = false;
-                                            videoRef.current.currentTime = 0;
-                                            videoRef.current.play();
-                                            setIsPlaying(true);
-                                        }
-                                    }, 100);
+                                    setMainVideoUrl(mainVideoUrl);
+                                    playVideo(mainVideoUrl, 'MAIN');
+                                    if (videoRef.current) videoRef.current.currentTime = 0;
                                 }}
                                 disabled={!mainVideoUrl}
                                 className={`flex-1 py-3 font-bold rounded flex flex-col items-center justify-center ${playbackState === 'MAIN' ? 'bg-red-600 text-white shadow-[0_0_15px_rgba(220,38,38,0.5)]' : 'bg-slate-700 hover:bg-white/10'}`}
@@ -944,17 +931,8 @@ export default function App() {
 
                             <button
                                 onClick={() => {
-                                    // Force Idle
                                     if (!idleVideoUrl) return alert('No Idle Video selected');
-                                    setVideoUrl(idleVideoUrl);
-                                    setPlaybackState('IDLE');
-                                    setTimeout(() => {
-                                        if (videoRef.current) {
-                                            videoRef.current.loop = true;
-                                            videoRef.current.play();
-                                            setIsPlaying(true);
-                                        }
-                                    }, 100);
+                                    playVideo(idleVideoUrl, 'IDLE');
                                 }}
                                 disabled={!idleVideoUrl}
                                 className={`w-20 py-3 font-bold rounded flex flex-col items-center justify-center ${playbackState === 'IDLE' ? 'bg-green-600 text-white' : 'bg-slate-700 hover:bg-white/10'}`}
