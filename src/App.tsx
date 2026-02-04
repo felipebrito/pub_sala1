@@ -199,9 +199,17 @@ const OutputWindow = ({ index }: { index: number }) => {
         channel.postMessage({ type: 'HELLO' });
         channel.onmessage = (e) => {
             if (e.data.type === 'SYNC' && videoRef.current) {
-                const { time, paused } = e.data;
+                const { time, paused, src } = e.data;
                 const v = videoRef.current;
-                // Only sync if significant drift
+
+                // Sync Source (if provided, changed, and not a local blob)
+                // Note: local blobs cannot be synced across windows easily without re-streaming
+                if (src && src !== v.src && !src.startsWith('blob:')) {
+                    console.log("Syncing source:", src);
+                    v.src = src;
+                }
+
+                // Only sync time if significant drift
                 if (Math.abs(v.currentTime - time) > 0.3) {
                     v.currentTime = time;
                 }
