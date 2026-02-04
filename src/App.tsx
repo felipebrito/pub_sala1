@@ -406,7 +406,11 @@ export default function App() {
 
     // 3. Video Handling
     useEffect(() => {
-        localStorage.setItem('lumina-video-url', videoUrl);
+        // Only save non-blob URLs to localStorage (blob URLs don't work across windows)
+        if (videoUrl && !videoUrl.startsWith('blob:')) {
+            localStorage.setItem('lumina-video-url', videoUrl);
+        }
+
         if (!videoUrl || !videoRef.current || !rendererRef.current) return;
 
         const video = videoRef.current;
