@@ -101,8 +101,8 @@ const DEFAULT_CONFIGS = (): ProjectorConfig[] => [0, 1, 2].map(i => ({
 
 // PROJECT MEDIA: Add your local files here (place them in public/videos/)
 const LOCAL_VIDEOS: { title: string; filename: string }[] = [
-    // Example: { title: 'My Video', filename: 'myvideo.mp4' }
-    // { title: 'Dinosaur Animation', filename: 'dino.mp4' },
+    { title: 'Idle Loop', filename: 'idle_loop.mp4' },
+    { title: 'Main Content', filename: 'main_content.mp4' },
 ];
 
 const OutputWindow = ({ index }: { index: number }) => {
@@ -340,8 +340,7 @@ export default function App() {
     // Hardcoded Fixed Videos
     useEffect(() => {
         // Initialize with fixed videos if not set
-        // Use Big Buck Bunny for Idle default to ensure signal if local file missing
-        setIdleVideoUrl('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4');
+        setIdleVideoUrl('/videos/idle_loop.mp4');
         setMainVideoUrl('/videos/main_content.mp4');
     }, []);
 
