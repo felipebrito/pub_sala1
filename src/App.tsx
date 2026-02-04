@@ -403,7 +403,7 @@ export default function App() {
     const [playbackState, setPlaybackState] = useState<'IDLE' | 'MAIN' | 'TRANSITION'>('IDLE');
     const [mixValue, setMixValue] = useState(0); // 0 = Idle, 1 = Main
     const [isLedBroadcastEnabled, setIsLedBroadcastEnabled] = useState(false);
-    const [ledDataRowLine, setLedDataRowLine] = useState(1081); // Default to last line
+    const [ledDataRowY, setLedDataRowY] = useState(0.99); // Normalized 0-1 (99% default)
     const [ledPreviewData, setLedPreviewData] = useState<Uint8Array | null>(null);
     const [isLedFlipped, setIsLedFlipped] = useState(false);
 
@@ -646,7 +646,7 @@ export default function App() {
                     let pixelData: Uint8Array | null = null;
 
                     // Always sample from MIXED source (Follows crossfade A/B)
-                    pixelData = rendererRef.current.sampleMixedSource(180, ledDataRowLine, mixValue);
+                    pixelData = rendererRef.current.sampleMixedSource(180, ledDataRowY, mixValue);
 
                     if (pixelData) {
                         // Flip data if needed (for reverse-wired LED strips)
@@ -685,8 +685,7 @@ export default function App() {
                                 ctx.globalAlpha = 1.0;
 
                                 // Draw sampling line on thumbnail
-                                const vH = video.videoHeight || 1081;
-                                const yPos = (ledDataRowLine / vH) * monH;
+                                const yPos = ledDataRowY * monH;
                                 ctx.strokeStyle = '#3b82f6';
                                 ctx.lineWidth = 2;
                                 ctx.beginPath();
@@ -718,7 +717,7 @@ export default function App() {
 
         rafId = requestAnimationFrame(sampleAndSend);
         return () => cancelAnimationFrame(rafId);
-    }, [isLedBroadcastEnabled, isLedBridgeConnected, ledDataRowLine, mixValue, isLedFlipped, sendLedData]);
+    }, [isLedBroadcastEnabled, isLedBridgeConnected, ledDataRowY, mixValue, isLedFlipped, sendLedData]);
 
     // --- Logic ---
 
@@ -1000,13 +999,13 @@ export default function App() {
 
                         <div className="space-y-2 pt-1 border-t border-white/5">
                             <div className="flex justify-between text-[9px] uppercase">
-                                <span className="text-slate-500">Target Line (1-1081)</span>
-                                <span className="text-amber-500 font-mono">#{ledDataRowLine}</span>
+                                <span className="text-slate-500">Target Level (0-100%)</span>
+                                <span className="text-amber-500 font-mono">{(ledDataRowY * 100).toFixed(1)}%</span>
                             </div>
                             <input
-                                type="range" min="1" max="1081" step="1"
-                                value={ledDataRowLine}
-                                onChange={(e) => setLedDataRowLine(parseInt(e.target.value))}
+                                type="range" min="0" max="1" step="0.001"
+                                value={ledDataRowY}
+                                onChange={(e) => setLedDataRowY(parseFloat(e.target.value))}
                                 className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
                             />
                             <div className="flex items-center justify-between pt-1">
@@ -1471,8 +1470,8 @@ export default function App() {
                                         {/* LED Sampling Indicator Line - Global across all projectors */}
                                         {isLedBroadcastEnabled && (
                                             <line
-                                                x1="-50" y1={(ledDataRowLine / 1081) * 202}
-                                                x2="410" y2={(ledDataRowLine / 1081) * 202}
+                                                x1="-50" y1={ledDataRowY * 202}
+                                                x2="410" y2={ledDataRowY * 202}
                                                 stroke="#3b82f6"
                                                 strokeWidth="2"
                                                 strokeDasharray="4 2"
@@ -1514,7 +1513,7 @@ export default function App() {
                         )}
                     </div>
                     <div className="text-[9px] text-slate-600 font-mono">
-                        Source: Mixed (Clean) | Line: #{ledDataRowLine}
+                        Source: Mixed (Clean) | Position: {(ledDataRowY * 100).toFixed(1)}%
                     </div>
                 </div>
             </main >

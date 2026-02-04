@@ -344,7 +344,7 @@ export class ThreeRenderer {
      * @param lineIndex 1-based line number (e.g., 1 to 1081)
      * @param mix Crossfade value (0 = Idle, 1 = Main)
      */
-    public sampleMixedSource(count: number, lineIndex: number, mix: number): Uint8Array | null {
+    public sampleMixedSource(count: number, yNorm: number, mix: number): Uint8Array | null {
         if (!this.samplingCtx) return null;
 
         if (this.samplingCanvas.width !== count) {
@@ -361,7 +361,7 @@ export class ThreeRenderer {
         // Draw Video A (Idle)
         if (this.videoA && this.videoA.readyState >= 2 && mix < 1.0) {
             const h = this.videoA.videoHeight;
-            const y = Math.min(Math.max(0, lineIndex - 5), h - windowHeight);
+            const y = Math.min(Math.max(0, (yNorm * h) - 5), h - windowHeight);
             this.samplingCtx.globalAlpha = 1.0 - mix;
             this.samplingCtx.drawImage(
                 this.videoA,
@@ -373,7 +373,7 @@ export class ThreeRenderer {
         // Draw Video B (Main)
         if (this.videoB && this.videoB.readyState >= 2 && mix > 0.0) {
             const h = this.videoB.videoHeight;
-            const y = Math.min(Math.max(0, lineIndex - 5), h - windowHeight);
+            const y = Math.min(Math.max(0, (yNorm * h) - 5), h - windowHeight);
             this.samplingCtx.globalAlpha = mix;
             this.samplingCtx.globalCompositeOperation = 'lighter';
             this.samplingCtx.drawImage(
@@ -391,7 +391,7 @@ export class ThreeRenderer {
     /**
      * Samples a specific row of pixels from a single video source with averaging.
      */
-    public sampleVideo(type: 'idle' | 'main', count: number, lineIndex: number): Uint8Array | null {
+    public sampleVideo(type: 'idle' | 'main', count: number, yNorm: number): Uint8Array | null {
         const video = type === 'idle' ? this.videoA : this.videoB;
         if (!video || video.readyState < 2 || !this.samplingCtx) return null;
 
@@ -405,7 +405,8 @@ export class ThreeRenderer {
         this.samplingCtx.imageSmoothingQuality = 'high';
 
         const windowHeight = 10;
-        const y = Math.min(Math.max(0, lineIndex - 5), video.videoHeight - windowHeight);
+        const h = video.videoHeight;
+        const y = Math.min(Math.max(0, (yNorm * h) - 5), h - windowHeight);
 
         this.samplingCtx.drawImage(video, 0, y, video.videoWidth, windowHeight, 0, 0, count, 1);
         return this._pixelDataFromCanvas(count);
