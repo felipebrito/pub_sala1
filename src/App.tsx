@@ -145,6 +145,11 @@ const OutputWindow = ({ index }: { index: number }) => {
         const r = new ThreeRenderer([{ index, container: canvasWrapperRef.current }]);
         rendererRef.current = r;
 
+        // Force set video if already ready (Fix race condition where onCanPlay updates before renderer is ready)
+        if (videoRef.current && videoRef.current.readyState >= 1) {
+            r.setVideo(videoRef.current);
+        }
+
         // Sync Function
         const sync = () => {
             const str = localStorage.getItem('lumina-config-v4');
@@ -837,112 +842,112 @@ export default function App() {
                         <span className="text-sm">BACK TO IDLE</span>
                     </button>
                 </div>
-        </div>
-            </aside >
 
-        {/* Main Viewport */ }
-        < main className = "flex-1 flex items-center justify-center p-8 bg-gradient-to-b from-transparent to-black/20 overflow-hidden select-none" >
-            <div className="flex flex-row gap-4 transform scale-90 origin-center">
-                {projectors.map((config, i) => (
-                    <div key={i} className="relative group">
-                        {/* Header */}
-                        <div className="text-xs text-slate-500 mb-2 font-bold uppercase tracking-wider flex justify-between pointer-events-none">
-                            <span>P{i + 1}</span>
-                            <span className={i === selectedProjector ? 'text-amber-500' : ''}>
-                                {config.mode === 'linear' ? 'Quad' : 'Bezier'}
-                            </span>
+            </aside>
+
+            {/* Main Viewport */}
+            <main className="flex-1 flex items-center justify-center p-8 bg-gradient-to-b from-transparent to-black/20 overflow-hidden select-none" >
+                <div className="flex flex-row gap-4 transform scale-90 origin-center">
+                    {projectors.map((config, i) => (
+                        <div key={i} className="relative group">
+                            {/* Header */}
+                            <div className="text-xs text-slate-500 mb-2 font-bold uppercase tracking-wider flex justify-between pointer-events-none">
+                                <span>P{i + 1}</span>
+                                <span className={i === selectedProjector ? 'text-amber-500' : ''}>
+                                    {config.mode === 'linear' ? 'Quad' : 'Bezier'}
+                                </span>
+                            </div>
+
+                            {/* Canvas Container */}
+                            <div
+                                ref={containerRefs[i]}
+                                className={`rounded-sm overflow-hidden shadow-2xl ring-1 relative bg-black transition-all ${selectedProjector === i ? 'ring-amber-500/50 shadow-amber-500/10' : 'ring-white/10'
+                                    }`}
+                                style={{ width: '360px', height: '202px' }}
+                                onMouseDown={() => setSelectedProjector(i)}
+                            />
+
+                            {/* SVG Overlay */}
+                            <svg className="absolute top-6 left-0 overflow-visible" width="360" height="202">
+                                <g opacity={selectedProjector === i ? 1 : 0.3} className="transition-opacity duration-300">
+
+                                    {/* --- BEZIER VISUALIZATION --- */}
+                                    {config.mode === 'bicubic' && config.rows === 4 && (
+                                        <>
+                                            {/* Handle Lines */}
+                                            {/* Top Corners */}
+                                            <line x1={config.grid[0][0].x} y1={config.grid[0][0].y} x2={config.grid[0][1].x} y2={config.grid[0][1].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
+                                            <line x1={config.grid[0][0].x} y1={config.grid[0][0].y} x2={config.grid[1][0].x} y2={config.grid[1][0].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
+
+                                            <line x1={config.grid[0][3].x} y1={config.grid[0][3].y} x2={config.grid[0][2].x} y2={config.grid[0][2].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
+                                            <line x1={config.grid[0][3].x} y1={config.grid[0][3].y} x2={config.grid[1][3].x} y2={config.grid[1][3].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
+
+                                            {/* Bottom Corners */}
+                                            <line x1={config.grid[3][0].x} y1={config.grid[3][0].y} x2={config.grid[3][1].x} y2={config.grid[3][1].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
+                                            <line x1={config.grid[3][0].x} y1={config.grid[3][0].y} x2={config.grid[2][0].x} y2={config.grid[2][0].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
+
+                                            <line x1={config.grid[3][3].x} y1={config.grid[3][3].y} x2={config.grid[3][2].x} y2={config.grid[3][2].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
+                                            <line x1={config.grid[3][3].x} y1={config.grid[3][3].y} x2={config.grid[2][3].x} y2={config.grid[2][3].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
+
+                                            {/* Draw Control Points (Corners + Handles) */}
+                                            {config.grid.map((row, r) => row.map((pt, c) => {
+                                                // Ignore internal points (rows 1-2, cols 1-2)
+                                                if (r > 0 && r < 3 && c > 0 && c < 3) return null;
+
+                                                const isCorner = (r === 0 || r === 3) && (c === 0 || c === 3);
+                                                const isSelected = selectedPoints.some(p => p.r === r && p.c === c);
+
+                                                return (
+                                                    <g
+                                                        key={`${r}-${c}`}
+                                                        style={{ cursor: isCorner ? 'move' : 'crosshair' }}
+                                                        onMouseDown={(e) => handleDragStart(i, r, c, e)}
+                                                    >
+                                                        <circle cx={pt.x} cy={pt.y} r="15" fill="transparent" />
+                                                        <circle
+                                                            cx={pt.x} cy={pt.y} r={isCorner ? 5 : 3}
+                                                            fill={isSelected ? '#fff' : (isCorner ? '#f59e0b' : '#60a5fa')}
+                                                            stroke="#000" strokeWidth="1"
+                                                        />
+                                                    </g>
+                                                )
+                                            }))}
+                                        </>
+                                    )}
+
+                                    {/* --- LINEAR (QUAD) VISUALIZATION --- */}
+                                    {config.mode === 'linear' && (
+                                        <>
+                                            <polygon
+                                                points={`${config.grid[0][0].x},${config.grid[0][0].y} ${config.grid[0][1].x},${config.grid[0][1].y} ${config.grid[1][1].x},${config.grid[1][1].y} ${config.grid[1][0].x},${config.grid[1][0].y}`}
+                                                fill="none" stroke="#f59e0b" strokeWidth="2" opacity="0.5"
+                                            />
+                                            {config.grid.map((row, r) => row.map((pt, c) => {
+                                                const isSelected = selectedPoints.some(p => p.r === r && p.c === c);
+                                                return (
+                                                    <g
+                                                        key={`${r}-${c}`}
+                                                        style={{ cursor: 'move' }}
+                                                        onMouseDown={(e) => handleDragStart(i, r, c, e)}
+                                                    >
+                                                        <circle cx={pt.x} cy={pt.y} r="15" fill="transparent" />
+                                                        <circle
+                                                            cx={pt.x} cy={pt.y} r="6"
+                                                            fill={isSelected ? '#fff' : '#f59e0b'}
+                                                            stroke="#000" strokeWidth="1"
+                                                        />
+                                                    </g>
+                                                )
+                                            }))}
+                                        </>
+                                    )}
+
+                                </g>
+                            </svg>
                         </div>
-
-                        {/* Canvas Container */}
-                        <div
-                            ref={containerRefs[i]}
-                            className={`rounded-sm overflow-hidden shadow-2xl ring-1 relative bg-black transition-all ${selectedProjector === i ? 'ring-amber-500/50 shadow-amber-500/10' : 'ring-white/10'
-                                }`}
-                            style={{ width: '360px', height: '202px' }}
-                            onMouseDown={() => setSelectedProjector(i)}
-                        />
-
-                        {/* SVG Overlay */}
-                        <svg className="absolute top-6 left-0 overflow-visible" width="360" height="202">
-                            <g opacity={selectedProjector === i ? 1 : 0.3} className="transition-opacity duration-300">
-
-                                {/* --- BEZIER VISUALIZATION --- */}
-                                {config.mode === 'bicubic' && config.rows === 4 && (
-                                    <>
-                                        {/* Handle Lines */}
-                                        {/* Top Corners */}
-                                        <line x1={config.grid[0][0].x} y1={config.grid[0][0].y} x2={config.grid[0][1].x} y2={config.grid[0][1].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
-                                        <line x1={config.grid[0][0].x} y1={config.grid[0][0].y} x2={config.grid[1][0].x} y2={config.grid[1][0].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
-
-                                        <line x1={config.grid[0][3].x} y1={config.grid[0][3].y} x2={config.grid[0][2].x} y2={config.grid[0][2].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
-                                        <line x1={config.grid[0][3].x} y1={config.grid[0][3].y} x2={config.grid[1][3].x} y2={config.grid[1][3].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
-
-                                        {/* Bottom Corners */}
-                                        <line x1={config.grid[3][0].x} y1={config.grid[3][0].y} x2={config.grid[3][1].x} y2={config.grid[3][1].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
-                                        <line x1={config.grid[3][0].x} y1={config.grid[3][0].y} x2={config.grid[2][0].x} y2={config.grid[2][0].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
-
-                                        <line x1={config.grid[3][3].x} y1={config.grid[3][3].y} x2={config.grid[3][2].x} y2={config.grid[3][2].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
-                                        <line x1={config.grid[3][3].x} y1={config.grid[3][3].y} x2={config.grid[2][3].x} y2={config.grid[2][3].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
-
-                                        {/* Draw Control Points (Corners + Handles) */}
-                                        {config.grid.map((row, r) => row.map((pt, c) => {
-                                            // Ignore internal points (rows 1-2, cols 1-2)
-                                            if (r > 0 && r < 3 && c > 0 && c < 3) return null;
-
-                                            const isCorner = (r === 0 || r === 3) && (c === 0 || c === 3);
-                                            const isSelected = selectedPoints.some(p => p.r === r && p.c === c);
-
-                                            return (
-                                                <g
-                                                    key={`${r}-${c}`}
-                                                    style={{ cursor: isCorner ? 'move' : 'crosshair' }}
-                                                    onMouseDown={(e) => handleDragStart(i, r, c, e)}
-                                                >
-                                                    <circle cx={pt.x} cy={pt.y} r="15" fill="transparent" />
-                                                    <circle
-                                                        cx={pt.x} cy={pt.y} r={isCorner ? 5 : 3}
-                                                        fill={isSelected ? '#fff' : (isCorner ? '#f59e0b' : '#60a5fa')}
-                                                        stroke="#000" strokeWidth="1"
-                                                    />
-                                                </g>
-                                            )
-                                        }))}
-                                    </>
-                                )}
-
-                                {/* --- LINEAR (QUAD) VISUALIZATION --- */}
-                                {config.mode === 'linear' && (
-                                    <>
-                                        <polygon
-                                            points={`${config.grid[0][0].x},${config.grid[0][0].y} ${config.grid[0][1].x},${config.grid[0][1].y} ${config.grid[1][1].x},${config.grid[1][1].y} ${config.grid[1][0].x},${config.grid[1][0].y}`}
-                                            fill="none" stroke="#f59e0b" strokeWidth="2" opacity="0.5"
-                                        />
-                                        {config.grid.map((row, r) => row.map((pt, c) => {
-                                            const isSelected = selectedPoints.some(p => p.r === r && p.c === c);
-                                            return (
-                                                <g
-                                                    key={`${r}-${c}`}
-                                                    style={{ cursor: 'move' }}
-                                                    onMouseDown={(e) => handleDragStart(i, r, c, e)}
-                                                >
-                                                    <circle cx={pt.x} cy={pt.y} r="15" fill="transparent" />
-                                                    <circle
-                                                        cx={pt.x} cy={pt.y} r="6"
-                                                        fill={isSelected ? '#fff' : '#f59e0b'}
-                                                        stroke="#000" strokeWidth="1"
-                                                    />
-                                                </g>
-                                            )
-                                        }))}
-                                    </>
-                                )}
-
-                            </g>
-                        </svg>
-                    </div>
-                ))}
-            </div>
-            </main >
-        </div >
+                    ))}
+                </div>
+            </main>
+        </div>
     );
 }
