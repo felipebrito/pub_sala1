@@ -1,7 +1,9 @@
+
 import * as THREE from 'three';
 import { WarpMath } from './WarpMath';
+import { EdgeBlendMaterial } from './EdgeBlendMaterial';
 
-export interface RendererTarget {
+interface InitOptions {
     index: number;
     container: HTMLElement;
 }
@@ -27,7 +29,7 @@ export class ThreeRenderer {
     // Cache for Auto-Resize Logic
     private cache: (StateCache | null)[] = [null, null, null];
 
-    constructor(targets: RendererTarget[]) {
+    constructor(targets: InitOptions[]) {
         targets.forEach(({ index, container }) => {
             const width = container.clientWidth;
             const height = container.clientHeight;
@@ -84,11 +86,8 @@ export class ThreeRenderer {
 
             uvAttribute.needsUpdate = true;
 
-            const material = new THREE.MeshBasicMaterial({
-                color: 0xffffff,
-                side: THREE.DoubleSide,
-                map: null
-            });
+            const material = new EdgeBlendMaterial();
+            if (this.texture) material.map = this.texture;
 
             const mesh = new THREE.Mesh(geometry, material);
             scene.add(mesh);
@@ -113,9 +112,9 @@ export class ThreeRenderer {
 
         this.meshes.forEach(mesh => {
             if (mesh) {
-                const material = mesh.material as THREE.MeshBasicMaterial;
+                const material = mesh.material as EdgeBlendMaterial;
                 material.map = this.texture;
-                material.color.setHex(0xffffff);
+                // ShaderMaterial doesn't have .color property
                 material.needsUpdate = true;
             }
         });
@@ -185,6 +184,9 @@ export class ThreeRenderer {
         const uMin = crop.x;
         const uMax = crop.x + crop.width;
 
+        const vMin = crop.y; // Assuming uniform expects raw crop values
+        const vMax = crop.y + crop.height; // Assuming uniform expects raw crop values
+
         const vTop = 1 - crop.y;
         const vBottom = 1 - (crop.y + crop.height);
 
@@ -205,6 +207,28 @@ export class ThreeRenderer {
         }
 
         uvAttribute.needsUpdate = true;
+
+        // Update Shader Crop Info
+        if (mesh) {
+            const mat = mesh.material as EdgeBlendMaterial;
+            if (mat.uniforms && mat.uniforms.cropInfo) {
+                mat.uniforms.cropInfo.value.set(uMin, uMax, vMin, vMax);
+            }
+        }
+    }
+
+    public updateEdgeBlend(index: number, blend: { left: number, right: number, top: number, bottom: number, gamma?: number }) {
+        const mesh = this.meshes[index];
+        if (!mesh) return;
+        const mat = mesh.material as EdgeBlendMaterial;
+
+        if (mat.uniforms) {
+            mat.uniforms.blendLeft.value = blend.left;
+            mat.uniforms.blendRight.value = blend.right;
+            mat.uniforms.blendTop.value = blend.top;
+            mat.uniforms.blendBottom.value = blend.bottom;
+            if (blend.gamma !== undefined) mat.uniforms.gamma.value = blend.gamma;
+        }
     }
 
     private animate = () => {
@@ -223,7 +247,7 @@ export class ThreeRenderer {
 
                 if (cached && (currentW !== cached.width || currentH !== cached.height)) {
                     if (currentW > 0 && currentH > 0) {
-                        // console.log(`[ThreeRenderer] Resizing Projector ${i} to ${currentW}x${currentH}`);
+                        // console.log(`[ThreeRenderer] Resizing Projector ${ i } to ${ currentW }x${ currentH } `);
                         renderer.setSize(currentW, currentH, false);
                         camera.right = currentW;
                         camera.bottom = currentH;

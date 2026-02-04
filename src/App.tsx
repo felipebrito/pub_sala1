@@ -6,11 +6,13 @@ import { Play, Pause, Grid3X3, MousePointer2, ExternalLink } from 'lucide-react'
 // Types
 interface Point { x: number; y: number }
 interface Crop { x: number, y: number, width: number, height: number }
+interface EdgeBlendConfig { left: number; right: number; top: number; bottom: number; gamma: number; }
 interface ProjectorConfig {
     grid: Point[][]; // [rows][cols]
     rows: number;
     cols: number;
     crop: Crop;
+    edgeBlend: EdgeBlendConfig;
     mode: 'linear' | 'bicubic'; // visualization/interaction mode: linear=Quad (2x2), bicubic=Bezier (Handles)
 }
 
@@ -79,6 +81,7 @@ const calculateInternalPoints = (grid: Point[][]): Point[][] => {
 };
 
 // Default Config
+// Default Config
 const DEFAULT_CONFIGS = (): ProjectorConfig[] => [0, 1, 2].map(i => ({
     rows: 2,
     cols: 2,
@@ -89,7 +92,8 @@ const DEFAULT_CONFIGS = (): ProjectorConfig[] => [0, 1, 2].map(i => ({
         y: 0,
         width: 1 / 3,
         height: 1
-    }
+    },
+    edgeBlend: { left: 0, right: 0, top: 0, bottom: 0, gamma: 1.0 }
 }));
 
 const OutputWindow = ({ index }: { index: number }) => {
@@ -282,7 +286,7 @@ export default function App() {
     // --- State ---
     const loadConfig = (): ProjectorConfig[] => {
         try {
-            const saved = localStorage.getItem('lumina-config-v3'); // v3 for new props
+            const saved = localStorage.getItem('lumina-config-v4'); // v4 for Edge Blend
             if (saved) return JSON.parse(saved);
         } catch (e) {
             console.error(e);
@@ -350,9 +354,9 @@ export default function App() {
         };
     }, []);
 
-    // 2. Sync Projectors Projectors -> Renderer & Storage
+    // 2. Sync Projectors Projectors -> Renderer    // Auto-Save
     useEffect(() => {
-        localStorage.setItem('lumina-config-v3', JSON.stringify(projectors));
+        localStorage.setItem('lumina-config-v4', JSON.stringify(projectors));
 
         if (!rendererRef.current) return;
 
@@ -602,6 +606,66 @@ export default function App() {
                                 />
                             </div>
                         ))}
+                    </div>
+                </div>
+
+                {/* Edge Blending */}
+                <div className="p-3 bg-white/5 rounded border border-white/5 space-y-3">
+                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                        Edge Blending
+                    </h3>
+                    <div className="space-y-3">
+                        {['left', 'right', 'top', 'bottom'].map(side => (
+                            <div key={side}>
+                                <div className="flex justify-between text-[10px] mb-1 uppercase">
+                                    <span className="text-slate-500">{side}</span>
+                                    <span>{Math.round(projectors[selectedProjector].edgeBlend[side as keyof EdgeBlendConfig] * 100)}%</span>
+                                </div>
+                                <input
+                                    type="range" min="0" max="0.5" step="0.01"
+                                    value={projectors[selectedProjector].edgeBlend[side as keyof EdgeBlendConfig]}
+                                    onChange={(e) => {
+                                        const newConfigs = [...projectors];
+                                        newConfigs[selectedProjector].edgeBlend = {
+                                            ...newConfigs[selectedProjector].edgeBlend,
+                                            [side]: parseFloat(e.target.value)
+                                        };
+                                        const r = rendererRef.current;
+                                        if (r) {
+                                            r.updateEdgeBlend(selectedProjector, newConfigs[selectedProjector].edgeBlend);
+                                        }
+                                        setProjectors(newConfigs);
+                                    }}
+                                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                                />
+                            </div>
+                        ))}
+
+                        {/* Gamma Slider */}
+                        <div>
+                            <div className="flex justify-between text-[10px] mb-1 uppercase">
+                                <span className="text-slate-500">Smoothness (Gamma)</span>
+                                <span>{projectors[selectedProjector].edgeBlend.gamma || 1.0}</span>
+                            </div>
+                            <input
+                                type="range" min="0.1" max="4.0" step="0.1"
+                                value={projectors[selectedProjector].edgeBlend.gamma || 1.0}
+                                onChange={(e) => {
+                                    const newConfigs = [...projectors];
+                                    const val = parseFloat(e.target.value);
+                                    newConfigs[selectedProjector].edgeBlend = {
+                                        ...newConfigs[selectedProjector].edgeBlend,
+                                        gamma: val
+                                    };
+                                    const r = rendererRef.current;
+                                    if (r) {
+                                        r.updateEdgeBlend(selectedProjector, newConfigs[selectedProjector].edgeBlend);
+                                    }
+                                    setProjectors(newConfigs);
+                                }}
+                                className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                            />
+                        </div>
                     </div>
                 </div>
 
