@@ -1,18 +1,20 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ThreeRenderer } from './core/ThreeRenderer'
 import { TEST_VIDEOS } from './constants/videos';
-import { Play, Pause, Grid3X3, MousePointer2, ExternalLink } from 'lucide-react'
+import { Play, Pause, Grid3X3, MousePointer2, ExternalLink, RotateCcw } from 'lucide-react'
 
 // Types
 interface Point { x: number; y: number }
 interface Crop { x: number, y: number, width: number, height: number }
 interface EdgeBlendConfig { left: number; right: number; top: number; bottom: number; gamma: number; }
+interface Mask { id: string; points: Point[] }
 interface ProjectorConfig {
     grid: Point[][]; // [rows][cols]
     rows: number;
     cols: number;
     crop: Crop;
     edgeBlend: EdgeBlendConfig;
+    masks: Mask[];
     mode: 'linear' | 'bicubic'; // visualization/interaction mode: linear=Quad (2x2), bicubic=Bezier (Handles)
 }
 
@@ -93,7 +95,8 @@ const DEFAULT_CONFIGS = (): ProjectorConfig[] => [0, 1, 2].map(i => ({
         width: 1 / 3,
         height: 1
     },
-    edgeBlend: { left: 0, right: 0, top: 0, bottom: 0, gamma: 1.0 }
+    edgeBlend: { left: 0, right: 0, top: 0, bottom: 0, gamma: 1.0 },
+    masks: []
 }));
 
 const OutputWindow = ({ index }: { index: number }) => {
@@ -246,6 +249,11 @@ const OutputWindow = ({ index }: { index: number }) => {
                 muted
                 playsInline
                 autoPlay
+                onTimeUpdate={(e) => {
+                    // Sync time display if needed? No, output window purely renders.
+                    // But if we want to debug seek:
+                    // console.log(e.currentTarget.currentTime);
+                }}
                 onCanPlay={() => {
                     if (videoRef.current && rendererRef.current) {
                         videoRef.current.play().catch(e => console.warn(e));
@@ -286,7 +294,7 @@ export default function App() {
     // --- State ---
     const loadConfig = (): ProjectorConfig[] => {
         try {
-            const saved = localStorage.getItem('lumina-config-v4'); // v4 for Edge Blend
+            const saved = localStorage.getItem('lumina-config-v5'); // v5 for Masks
             if (saved) return JSON.parse(saved);
         } catch (e) {
             console.error(e);
@@ -298,9 +306,20 @@ export default function App() {
     const [selectedProjector, setSelectedProjector] = useState(0);
     const [selectedPoints, setSelectedPoints] = useState<{ r: number, c: number }[]>([]);
 
+    // Masking State
+    const [activeTool, setActiveTool] = useState<'move' | 'mask'>('move');
+    const [drawingMask, setDrawingMask] = useState<Point[]>([]);
+
     // Video State
     const [isPlaying, setIsPlaying] = useState(false);
     const [videoUrl, setVideoUrl] = useState(() => localStorage.getItem('lumina-video-url') || '');
+
+    // Playlist State
+    const [idleVideoUrl, setIdleVideoUrl] = useState<string>('');
+    const [mainVideoUrl, setMainVideoUrl] = useState<string>('');
+    const [playbackState, setPlaybackState] = useState<'IDLE' | 'MAIN'>('IDLE');
+    const [currentTime, setCurrentTime] = useState(0);
+    const [duration, setDuration] = useState(0);
 
     // Refs
     const rendererRef = useRef<ThreeRenderer | null>(null);
@@ -524,7 +543,33 @@ export default function App() {
 
     return (
         <div className="flex h-screen bg-[#0a0e1a] text-slate-300">
-            <video ref={videoRef} onPlay={broadcastSync} onPause={broadcastSync} onSeeked={broadcastSync} style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }} playsInline autoPlay muted loop />
+            <video
+                ref={videoRef}
+                onPlay={broadcastSync}
+                onPause={broadcastSync}
+                onSeeked={broadcastSync}
+                onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+                onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+                onEnded={() => {
+                    if (playbackState === 'MAIN') {
+                        // Main finished -> Back to Idle
+                        if (idleVideoUrl) {
+                            setVideoUrl(idleVideoUrl);
+                            setPlaybackState('IDLE');
+                            setTimeout(() => {
+                                if (videoRef.current) {
+                                    videoRef.current.loop = true;
+                                    videoRef.current.play();
+                                }
+                            }, 50);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }
+                }}
+                style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }}
+                playsInline autoPlay muted loop
+            />
 
             <aside className="w-64 bg-[#0f1419] border-r border-white/10 p-6 flex flex-col gap-6 overflow-y-auto z-10 shrink-0">
                 <div>
@@ -669,37 +714,187 @@ export default function App() {
                     </div>
                 </div>
 
-                {/* Video Controls */}
-                <div>
-                    <h2 className="text-xs font-bold text-slate-500 uppercase mb-3">Video</h2>
-                    <select
-                        value={videoUrl}
-                        onChange={(e) => setVideoUrl(e.target.value)}
-                        className="w-full bg-slate-800 text-white px-3 py-2 rounded-lg text-sm mb-2 border border-slate-700 hover:border-slate-600 focus:outline-none"
-                    >
-                        <option value="">Select test video...</option>
-                        {TEST_VIDEOS.map((video, i) => (
-                            <option key={i} value={video.url}>{video.title}</option>
-                        ))}
-                    </select>
-                    <button onClick={loadVideo} className="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm mb-2">
-                        Custom URL...
-                    </button>
-                    <button
-                        onClick={togglePlayback}
-                        disabled={!videoUrl}
-                        className={`w-full px-4 py-2 rounded-lg text-sm flex items-center justify-center gap-2 ${!videoUrl ? 'bg-slate-800 text-slate-600' :
-                            isPlaying ? 'bg-amber-600 hover:bg-amber-500' : 'bg-green-600 hover:bg-green-500'
-                            }`}
-                    >
-                        {isPlaying ? <Pause size={16} /> : <Play size={16} />}
-                        {isPlaying ? 'Pause' : 'Play'}
-                    </button>
+                {/* Masking Toolbar */}
+                <div className="p-3 bg-white/5 rounded border border-white/5 space-y-3">
+                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex justify-between items-center">
+                        Masking Tool
+                        {activeTool === 'mask' && <span className="text-amber-500 text-[10px] animate-pulse">ACTIVE</span>}
+                    </h3>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => {
+                                setActiveTool(prev => prev === 'mask' ? 'move' : 'mask');
+                                setDrawingMask([]);
+                            }}
+                            className={`flex-1 py-2 text-xs font-bold rounded flex items-center justify-center gap-2 ${activeTool === 'mask' ? 'bg-amber-500 text-black' : 'bg-slate-700 hover:bg-slate-600'}`}
+                        >
+                            {activeTool === 'mask' ? 'Finish / Exit' : 'Draw Mask'}
+                        </button>
+                        {drawingMask.length > 2 && (
+                            <button
+                                onClick={() => {
+                                    // Save Mask
+                                    const newMask: Mask = { id: crypto.randomUUID(), points: drawingMask };
+                                    const newConfigs = [...projectors];
+                                    newConfigs[selectedProjector].masks = [...(newConfigs[selectedProjector].masks || []), newMask];
+                                    setProjectors(newConfigs);
+                                    setDrawingMask([]);
+                                }}
+                                className="bg-green-600 hover:bg-green-500 text-white px-3 rounded"
+                            >
+                                Save
+                            </button>
+                        )}
+                        <button
+                            onClick={() => {
+                                if (confirm('Clear all masks for this projector?')) {
+                                    const newConfigs = [...projectors];
+                                    newConfigs[selectedProjector].masks = [];
+                                    setProjectors(newConfigs);
+                                }
+                            }}
+                            className="bg-red-900/50 hover:bg-red-900 text-white px-3 rounded"
+                            title="Clear All Masks"
+                        >
+                            ×
+                        </button>
+                    </div>
+                    <div className="text-[10px] text-slate-500 leading-tight">
+                        {activeTool === 'mask'
+                            ? 'Click on the preview to add points. Click "Save" to close the shape.'
+                            : 'Click "Draw Mask" to start creating blackout polygons.'}
+                    </div>
+                </div>
+
+                {/* Video Playlist & Player */}
+                <div className="p-3 bg-white/5 rounded border border-white/5 space-y-4">
+                    <h2 className="text-xs font-bold text-slate-500 uppercase flex justify-between">
+                        Playlist Control
+                        <span className={`text-[10px] px-2 rounded ${playbackState === 'IDLE' ? 'bg-slate-700' : 'bg-red-600 text-white animate-pulse'}`}>
+                            {playbackState}
+                        </span>
+                    </h2>
+
+                    {/* IDLE SLOT */}
+                    <div>
+                        <div className="text-[10px] text-slate-400 uppercase mb-1">Idle Loop (Background)</div>
+                        <div className="flex gap-2">
+                            <input
+                                type="file"
+                                accept="video/*"
+                                className="hidden"
+                                id="idle-upload"
+                                onChange={(e) => {
+                                    if (e.target.files?.[0]) setIdleVideoUrl(URL.createObjectURL(e.target.files[0]));
+                                }}
+                            />
+                            <label htmlFor="idle-upload" className="bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded text-xs cursor-pointer truncate flex-1 text-center">
+                                {idleVideoUrl ? 'Change Idle File' : 'Select Idle Video...'}
+                            </label>
+                            {idleVideoUrl && <button onClick={() => setIdleVideoUrl('')} className="text-red-500 hover:text-red-400">×</button>}
+                        </div>
+                    </div>
+
+                    {/* MAIN SLOT */}
+                    <div>
+                        <div className="text-[10px] text-slate-400 uppercase mb-1">Main Content (One-Shot)</div>
+                        <div className="flex gap-2">
+                            <input
+                                type="file"
+                                accept="video/*"
+                                className="hidden"
+                                id="main-upload"
+                                onChange={(e) => {
+                                    if (e.target.files?.[0]) setMainVideoUrl(URL.createObjectURL(e.target.files[0]));
+                                }}
+                            />
+                            <label htmlFor="main-upload" className="bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded text-xs cursor-pointer truncate flex-1 text-center">
+                                {mainVideoUrl ? 'Change Main File' : 'Select Main Video...'}
+                            </label>
+                            {mainVideoUrl && <button onClick={() => setMainVideoUrl('')} className="text-red-500 hover:text-red-400">×</button>}
+                        </div>
+                    </div>
+
+                    {/* TRANSPORT */}
+                    <div className="pt-2 border-t border-white/5">
+                        <div className="flex gap-2 mb-2">
+                            <button
+                                onClick={() => {
+                                    // Trigger Main Video
+                                    if (!mainVideoUrl) return alert('No Main Video selected');
+                                    setVideoUrl(mainVideoUrl);
+                                    setPlaybackState('MAIN');
+                                    setTimeout(() => {
+                                        if (videoRef.current) {
+                                            videoRef.current.loop = false;
+                                            videoRef.current.currentTime = 0;
+                                            videoRef.current.play();
+                                            setIsPlaying(true);
+                                        }
+                                    }, 100);
+                                }}
+                                disabled={!mainVideoUrl}
+                                className={`flex-1 py-3 font-bold rounded flex flex-col items-center justify-center ${playbackState === 'MAIN' ? 'bg-red-600 text-white shadow-[0_0_15px_rgba(220,38,38,0.5)]' : 'bg-slate-700 hover:bg-white/10'}`}
+                            >
+                                <span className="text-sm">PLAY MAIN</span>
+                            </button>
+
+                            <button
+                                onClick={() => {
+                                    // Force Idle
+                                    if (!idleVideoUrl) return alert('No Idle Video selected');
+                                    setVideoUrl(idleVideoUrl);
+                                    setPlaybackState('IDLE');
+                                    setTimeout(() => {
+                                        if (videoRef.current) {
+                                            videoRef.current.loop = true;
+                                            videoRef.current.play();
+                                            setIsPlaying(true);
+                                        }
+                                    }, 100);
+                                }}
+                                disabled={!idleVideoUrl}
+                                className={`w-20 py-3 font-bold rounded flex flex-col items-center justify-center ${playbackState === 'IDLE' ? 'bg-green-600 text-white' : 'bg-slate-700 hover:bg-white/10'}`}
+                            >
+                                <span className="text-[10px]">BACK TO</span>
+                                <span className="text-sm">IDLE</span>
+                            </button>
+                        </div>
+
+                        {/* Seek Bar & Controls */}
+                        <div className="bg-black/30 p-2 rounded">
+                            <input
+                                type="range" min="0" max={duration || 1} step="0.1"
+                                value={currentTime}
+                                onMouseDown={() => { /* Pause for seek? Optional */ }}
+                                onChange={(e) => {
+                                    const t = parseFloat(e.target.value);
+                                    setCurrentTime(t);
+                                    if (videoRef.current) videoRef.current.currentTime = t;
+                                }}
+                                className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500 mb-2"
+                            />
+                            <div className="flex justify-between items-center text-xs">
+                                <span>{new Date(currentTime * 1000).toISOString().substr(14, 5)}</span>
+                                <div className="flex gap-2">
+                                    <button onClick={togglePlayback} className="hover:text-white text-slate-400">
+                                        {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+                                    </button>
+                                    <button onClick={() => {
+                                        if (videoRef.current) videoRef.current.currentTime = 0;
+                                    }} className="hover:text-white text-slate-400">
+                                        <RotateCcw size={16} />
+                                    </button>
+                                </div>
+                                <span>{new Date(duration * 1000).toISOString().substr(14, 5)}</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </aside>
 
             {/* Main Viewport */}
-            <main className="flex-1 flex items-center justify-center p-8 bg-gradient-to-b from-transparent to-black/20 overflow-hidden select-none">
+            < main className="flex-1 flex items-center justify-center p-8 bg-gradient-to-b from-transparent to-black/20 overflow-hidden select-none" >
                 <div className="flex flex-row gap-4 transform scale-90 origin-center">
                     {projectors.map((config, i) => (
                         <div key={i} className="relative group">
@@ -800,7 +995,7 @@ export default function App() {
                         </div>
                     ))}
                 </div>
-            </main>
-        </div>
+            </main >
+        </div >
     );
 }

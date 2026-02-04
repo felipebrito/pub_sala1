@@ -8,7 +8,8 @@ export const EdgeBlendShader = {
         blendTop: { value: 0.0 },
         blendBottom: { value: 0.0 },
         cropInfo: { value: new THREE.Vector4(0, 1, 0, 1) }, // uMin, uMax, vMin, vMax
-        gamma: { value: 1.0 }
+        gamma: { value: 1.0 },
+        maskMap: { value: null } // New: Mask Texture (White=Visible, Black=Hidden)
     },
     vertexShader: `
         varying vec2 vUv;
@@ -19,6 +20,7 @@ export const EdgeBlendShader = {
     `,
     fragmentShader: `
         uniform sampler2D map;
+        uniform sampler2D maskMap; // New: Mask Texture
         uniform float blendLeft;
         uniform float blendRight;
         uniform float blendTop;
@@ -29,29 +31,25 @@ export const EdgeBlendShader = {
         varying vec2 vUv;
 
         float ramp(float t) {
-            // Apply gamma curve to control gradient falloff
-            // t is linear 0..1
             return pow(t, gamma);
         }
 
         void main() {
             vec4 color = texture2D(map, vUv);
             
+            // Apply Mask (Sample global UV)
+            vec4 mask = texture2D(maskMap, vUv);
+            color.rgb *= mask.r; 
+
             // Calculate LOCAL UV (0..1) relative to crop
-            // uLocal = (globalU - uMin) / (uMax - uMin)
             float uSpan = cropInfo.y - cropInfo.x;
             float vSpan = cropInfo.w - cropInfo.z;
             
-            // Avoid division by zero
             if (uSpan < 0.001) uSpan = 0.001;
             if (vSpan < 0.001) vSpan = 0.001;
 
             float uLocal = (vUv.x - cropInfo.x) / uSpan;
             float vLocal = (vUv.y - cropInfo.z) / vSpan;
-            
-            // Edge Blending = darkening edges to black -> Alpha 0
-            // Since projectors add light, "Black" means no light.
-            // Transparency over Black background works too.
             
             float alpha = 1.0;
             
@@ -61,31 +59,24 @@ export const EdgeBlendShader = {
                       alpha *= ramp(uLocal / blendLeft);
                  }
             }
-            
             // Right Edge
             if (blendRight > 0.0) {
                  if (uLocal > (1.0 - blendRight)) {
                       alpha *= ramp((1.0 - uLocal) / blendRight);
                  }
             }
-            
-             // Top Edge (vLocal 1 is Top)
+            // Top Edge
              if (blendTop > 0.0) {
                   if (vLocal > (1.0 - blendTop)) {
                       alpha *= ramp((1.0 - vLocal) / blendTop);
                   }
              }
-             
              // Bottom Edge
              if (blendBottom > 0.0) {
                   if (vLocal < blendBottom) {
                        alpha *= ramp(vLocal / blendBottom);
                   }
              }
-            
-            // Apply Factor to RGB. Alpha channel doesn't matter for projection on wall, 
-            // but matters if three.js rendering context is transparent? 
-            // Projectors map Black to "Off". So modifying RGB is correct.
             
             gl_FragColor = vec4(color.rgb * alpha, 1.0); 
         }

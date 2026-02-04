@@ -87,6 +87,12 @@ export class ThreeRenderer {
             uvAttribute.needsUpdate = true;
 
             const material = new EdgeBlendMaterial();
+            // Default Mask (White 1x1) to prevent black screen
+            const whiteData = new Uint8Array([255, 255, 255, 255]);
+            const whiteTex = new THREE.DataTexture(whiteData, 1, 1, THREE.RGBAFormat);
+            whiteTex.needsUpdate = true;
+            if (material.uniforms.maskMap) material.uniforms.maskMap.value = whiteTex;
+
             if (this.texture) material.map = this.texture;
 
             const mesh = new THREE.Mesh(geometry, material);
