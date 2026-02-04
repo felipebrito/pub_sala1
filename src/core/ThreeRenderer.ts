@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { WarpMath } from './WarpMath';
+import { EdgeBlendMaterial } from './EdgeBlendMaterial';
 
 export interface RendererTarget {
     index: number;
@@ -84,11 +85,8 @@ export class ThreeRenderer {
 
             uvAttribute.needsUpdate = true;
 
-            const material = new THREE.MeshBasicMaterial({
-                color: 0xffffff,
-                side: THREE.DoubleSide,
-                map: null
-            });
+            const material = new EdgeBlendMaterial();
+            if (this.texture) material.map = this.texture;
 
             const mesh = new THREE.Mesh(geometry, material);
             scene.add(mesh);
@@ -113,9 +111,8 @@ export class ThreeRenderer {
 
         this.meshes.forEach(mesh => {
             if (mesh) {
-                const material = mesh.material as THREE.MeshBasicMaterial;
+                const material = mesh.material as EdgeBlendMaterial;
                 material.map = this.texture;
-                material.color.setHex(0xffffff);
                 material.needsUpdate = true;
             }
         });
@@ -205,6 +202,32 @@ export class ThreeRenderer {
         }
 
         uvAttribute.needsUpdate = true;
+
+        // Update Shader Crop Info
+        if (mesh) {
+            const mat = mesh.material as EdgeBlendMaterial;
+            if (mat.uniforms && mat.uniforms.cropInfo) {
+                const uMin = crop.x;
+                const uMax = crop.x + crop.width;
+                const vMin = crop.y;
+                const vMax = crop.y + crop.height;
+                mat.uniforms.cropInfo.value.set(uMin, uMax, vMin, vMax);
+            }
+        }
+    }
+
+    public updateEdgeBlend(index: number, blend: { left: number, right: number, top: number, bottom: number, gamma?: number }) {
+        const mesh = this.meshes[index];
+        if (!mesh) return;
+        const mat = mesh.material as EdgeBlendMaterial;
+
+        if (mat.uniforms) {
+            mat.uniforms.blendLeft.value = blend.left;
+            mat.uniforms.blendRight.value = blend.right;
+            mat.uniforms.blendTop.value = blend.top;
+            mat.uniforms.blendBottom.value = blend.bottom;
+            if (blend.gamma !== undefined) mat.uniforms.gamma.value = blend.gamma;
+        }
     }
 
     private animate = () => {
