@@ -171,6 +171,7 @@ const OutputWindow = ({ index }: { index: number }) => {
                 }
             }
             if (k === 'a') {
+                e.preventDefault();
                 setAspectLock(prev => !prev);
             }
         };
@@ -214,16 +215,22 @@ const OutputWindow = ({ index }: { index: number }) => {
     useEffect(() => {
         const handleResize = () => {
             if (rendererRef.current && canvasWrapperRef.current) {
-                // Resize Renderer to match Wrapper (which is 100% of window)
-                const w = window.innerWidth;
-                const h = window.innerHeight;
-                // rendererRef.current.resize(index, w, h); // Auto-resize in animate loop now
+                // Resize Renderer to match Wrapper (which is 100% of window or aspect locked container)
+                const w = canvasWrapperRef.current.clientWidth;
+                const h = canvasWrapperRef.current.clientHeight;
+                if (w > 0 && h > 0) {
+                    rendererRef.current.resize(index, w, h);
+                }
             }
         };
-        handleResize();
+        // Use a small delay to ensure DOM has updated styles for aspectratio
+        const timeout = setTimeout(handleResize, 50);
         window.addEventListener('resize', handleResize);
-        return () => window.removeEventListener('resize', handleResize);
-    }, [index]);
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            clearTimeout(timeout);
+        };
+    }, [index, aspectLock]);
 
     // Sync Slave (Updated for Dual Video)
     useEffect(() => {
@@ -231,7 +238,7 @@ const OutputWindow = ({ index }: { index: number }) => {
         channel.postMessage({ type: 'HELLO' });
         channel.onmessage = (e) => {
             if (e.data.type === 'SYNC') {
-                const { idleSrc, mainSrc, idleTime, mainTime, idlePaused, mainPaused, mix } = e.data;
+                const { idleSrc, mainSrc, idleTime, mainTime, idlePaused, mainPaused, mix, syncProjectors } = e.data;
 
                 // Sync Videos
                 if (idleVideoRef.current) {
@@ -250,9 +257,17 @@ const OutputWindow = ({ index }: { index: number }) => {
                     if (!mainPaused && v.paused) v.play().catch(() => { });
                 }
 
-                // Sync Mix
+                // Sync Mix & Config (Blending/Warp/Crop)
                 if (rendererRef.current) {
                     rendererRef.current.setCrossfade(mix);
+
+                    if (syncProjectors && syncProjectors[index]) {
+                        const conf = syncProjectors[index];
+                        setConfig(conf);
+                        rendererRef.current.updateInputCrop(index, conf.crop);
+                        rendererRef.current.updateGridWarp(index, conf.grid, conf.rows, conf.cols, conf.mode);
+                        if (conf.edgeBlend) rendererRef.current.updateEdgeBlend(index, conf.edgeBlend);
+                    }
                 }
             }
         };
@@ -563,7 +578,8 @@ export default function App() {
             mainTime: mainVideoRef.current?.currentTime || 0,
             idlePaused: idleVideoRef.current?.paused || false,
             mainPaused: mainVideoRef.current?.paused || false,
-            mix: mixValueRef.current // Use Ref here
+            mix: mixValueRef.current,
+            syncProjectors: projectors // Include full config for real-time blending/warp sync
         });
         channel.close();
     };

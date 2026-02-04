@@ -186,6 +186,24 @@ export class ThreeRenderer {
         positions.needsUpdate = true;
     }
 
+    public resize(index: number, width: number, height: number) {
+        const renderer = this.renderers[index];
+        const camera = this.cameras[index];
+        const mesh = this.meshes[index];
+        if (!renderer || !camera || !mesh) return;
+
+        renderer.setSize(width, height);
+        camera.right = width;
+        camera.bottom = height;
+        camera.updateProjectionMatrix();
+
+        // Re-apply warp with new dimensions
+        const state = this.cache[index];
+        if (state) {
+            this.updateGridWarp(index, state.grid, state.rows, state.cols, state.mode);
+        }
+    }
+
     public updateInputCrop(index: number, crop: { x: number, y: number, width: number, height: number }) {
         const mesh = this.meshes[index];
         if (!mesh) return;
