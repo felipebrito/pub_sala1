@@ -403,6 +403,8 @@ export default function App() {
     const [playbackState, setPlaybackState] = useState<'IDLE' | 'MAIN' | 'TRANSITION'>('IDLE');
     const [mixValue, setMixValue] = useState(0); // 0 = Idle, 1 = Main
     const [isLedBroadcastEnabled, setIsLedBroadcastEnabled] = useState(false);
+    const [ledSampleMethod, setLedSampleMethod] = useState<'OUTPUT' | 'VIDEO'>('OUTPUT');
+    const [ledDataRowY, setLedDataRowY] = useState(0.99); // Default to near bottom
 
     // LED Bridge
     const { isConnected: isLedBridgeConnected, sendData: sendLedData } = useLedBridge();
@@ -638,9 +640,17 @@ export default function App() {
         const sampleAndSend = (time: number) => {
             if (time - lastTime >= interval) {
                 if (rendererRef.current) {
-                    // Sample from the first projector (main content area)
-                    // 180 pixels for the WS2811 strip
-                    const pixelData = rendererRef.current.samplePixels(0, 180);
+                    // Sample based on method
+                    let pixelData: Uint8Array | null = null;
+
+                    if (ledSampleMethod === 'OUTPUT') {
+                        // Sample from the first projector (main content area)
+                        pixelData = rendererRef.current.samplePixels(0, 180);
+                    } else {
+                        // Sample directly from the Main Video texture
+                        pixelData = rendererRef.current.sampleVideo('main', 180, ledDataRowY);
+                    }
+
                     if (pixelData) {
                         sendLedData(pixelData);
                     }
@@ -652,7 +662,7 @@ export default function App() {
 
         rafId = requestAnimationFrame(sampleAndSend);
         return () => cancelAnimationFrame(rafId);
-    }, [isLedBroadcastEnabled, isLedBridgeConnected, sendLedData]);
+    }, [isLedBroadcastEnabled, isLedBridgeConnected, ledSampleMethod, ledDataRowY, sendLedData]);
 
     // --- Logic ---
 
@@ -1249,6 +1259,41 @@ export default function App() {
                             {isLedBroadcastEnabled ? 'BROADCASTING' : 'OFF AIR'}
                         </button>
                     </div>
+
+                    <div className="space-y-4 pt-4 border-t border-white/5">
+                        <div className="flex flex-col gap-2">
+                            <span className="text-[10px] uppercase font-bold text-white/40">Sampling Source</span>
+                            <div className="flex bg-slate-800 rounded p-1">
+                                {(['OUTPUT', 'VIDEO'] as const).map(m => (
+                                    <button
+                                        key={m}
+                                        onClick={() => setLedSampleMethod(m)}
+                                        className={`flex-1 py-1.5 text-[10px] rounded transition-all ${ledSampleMethod === m ? 'bg-amber-500 text-black font-bold' : 'text-slate-400 hover:text-white'}`}
+                                    >
+                                        {m === 'OUTPUT' ? 'Output Canvas' : 'Video Data Row'}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {ledSampleMethod === 'VIDEO' && (
+                            <div className="space-y-2">
+                                <div className="flex justify-between text-[10px] uppercase">
+                                    <span className="text-slate-500">Data Row Y Pos</span>
+                                    <span className="text-amber-500 font-mono">{Math.round(ledDataRowY * 100)}%</span>
+                                </div>
+                                <input
+                                    type="range" min="0" max="1" step="0.001"
+                                    value={ledDataRowY}
+                                    onChange={(e) => setLedDataRowY(parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                                />
+                                <div className="text-[9px] text-slate-600 italic">
+                                    * Samples high-res source regardless of mapping.
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 <div className="pt-2 border-t border-white/5 space-y-2">
@@ -1262,7 +1307,7 @@ export default function App() {
             </aside>
 
             {/* Main Viewport */}
-            <main className="flex-1 flex items-center justify-center p-8 bg-gradient-to-b from-transparent to-black/20 overflow-hidden select-none" >
+            <main className="flex-1 flex items-center justify-center p-8 bg-gradient-to-b from-transparent to-black/20 overflow-hidden select-none">
                 <div className="flex flex-row gap-4 transform scale-90 origin-center">
                     {projectors.map((config, i) => (
                         <div key={i} className="relative group">
@@ -1355,7 +1400,7 @@ export default function App() {
                         </div>
                     ))}
                 </div>
-            </main>
-        </div>
+            </main >
+        </div >
     );
 }

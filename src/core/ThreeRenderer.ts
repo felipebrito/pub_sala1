@@ -34,7 +34,19 @@ export class ThreeRenderer {
     // Cache for Auto-Resize Logic
     private cache: (StateCache | null)[] = [null, null, null];
 
+    // Video Elements (for direct pixel sampling)
+    private videoA: HTMLVideoElement | null = null;
+    private videoB: HTMLVideoElement | null = null;
+
+    // Internal sampling assets
+    private samplingCanvas: HTMLCanvasElement;
+    private samplingCtx: CanvasRenderingContext2D | null;
+
     constructor(targets: InitOptions[]) {
+        // Init sampling canvas
+        this.samplingCanvas = document.createElement('canvas');
+        this.samplingCtx = this.samplingCanvas.getContext('2d', { willReadFrequently: true });
+
         targets.forEach(({ index, container }) => {
             const width = container.clientWidth;
             const height = container.clientHeight;
@@ -114,6 +126,9 @@ export class ThreeRenderer {
             this.textureB.minFilter = THREE.LinearFilter;
             this.textureB.magFilter = THREE.LinearFilter;
         }
+
+        this.videoA = videoA;
+        this.videoB = videoB;
 
         // Update Meshes
         this.meshes.forEach(mesh => {
@@ -317,6 +332,47 @@ export class ThreeRenderer {
             result[i * 3] = rowData[sourceIdx];     // R
             result[i * 3 + 1] = rowData[sourceIdx + 1]; // G
             result[i * 3 + 2] = rowData[sourceIdx + 2]; // B
+        }
+
+        return result;
+    }
+
+    /**
+     * Efficiently samples a row of pixels DIRECTLY from the source video element.
+     * This avoids WebGL readback overhead and ignores warping/cropping.
+     * @param type 'idle' or 'main'
+     * @param count number of pixels to sample
+     * @param yNorm normalized Y position (0 = top, 1 = bottom)
+     */
+    public sampleVideo(type: 'idle' | 'main', count: number, yNorm: number): Uint8Array | null {
+        const video = type === 'idle' ? this.videoA : this.videoB;
+        if (!video || video.readyState < 2 || !this.samplingCtx) return null;
+
+        const w = video.videoWidth;
+        const h = video.videoHeight;
+        if (w === 0 || h === 0) return null;
+
+        // Resize sampling canvas to match video width (minimum required for a row)
+        if (this.samplingCanvas.width !== w) {
+            this.samplingCanvas.width = w;
+            this.samplingCanvas.height = 1;
+        }
+
+        const y = Math.floor(yNorm * h);
+
+        // Draw exactly one row from the video to our 1-pixel high canvas
+        this.samplingCtx.drawImage(video, 0, y, w, 1, 0, 0, w, 1);
+
+        const rowData = this.samplingCtx.getImageData(0, 0, w, 1).data;
+        const result = new Uint8Array(count * 3);
+        const step = w / count;
+
+        for (let i = 0; i < count; i++) {
+            const sampleX = Math.floor(i * step);
+            const sourceIdx = sampleX * 4;
+            result[i * 3] = rowData[sourceIdx];
+            result[i * 3 + 1] = rowData[sourceIdx + 1];
+            result[i * 3 + 2] = rowData[sourceIdx + 2];
         }
 
         return result;
