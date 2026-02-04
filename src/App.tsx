@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { ThreeRenderer } from './core/ThreeRenderer'
 import { useLedBridge } from './hooks/useLedBridge'
 import { TEST_VIDEOS } from './constants/videos';
-import { Play, Pause, Grid3X3, MousePointer2, ExternalLink, RotateCcw, Plus, Minus } from 'lucide-react'
+import { Play, Pause, Grid3X3, MousePointer2, ExternalLink, RotateCcw, Plus, Minus, ChevronDown } from 'lucide-react'
 import { io } from 'socket.io-client';
 
 // Types
@@ -405,7 +405,14 @@ export default function App() {
     const [isLedBroadcastEnabled, setIsLedBroadcastEnabled] = useState(false);
     const [ledDataRowY, setLedDataRowY] = useState(0.99); // Normalized 0-1 (99% default)
     const [ledPreviewData, setLedPreviewData] = useState<Uint8Array | null>(null);
+    const [collapsedSections, setCollapsedSections] = useState<string[]>([]);
     const [isLedFlipped, setIsLedFlipped] = useState(false);
+
+    const toggleSection = (id: string) => {
+        setCollapsedSections(prev =>
+            prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]
+        );
+    };
 
     // LED Bridge
     const { isConnected: isLedBridgeConnected, sendData: sendLedData } = useLedBridge();
@@ -937,271 +944,273 @@ export default function App() {
                     <div className="text-xs text-slate-600">3 x 1920x1080 Projectors</div>
                 </div>
 
-                {/* Projectors Selection */}
-                <div>
-                    <h2 className="text-xs font-bold text-slate-500 uppercase mb-3">Projectors</h2>
-                    {projectors.map((_, i) => (
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                        <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Projectors</h2>
                         <button
-                            key={i}
-                            onClick={() => setSelectedProjector(i)}
-                            className={`w-full text-left px-3 py-2 rounded-lg mb-1 transition-colors text-sm ${selectedProjector === i
-                                ? 'bg-amber-500 text-black font-bold'
-                                : 'hover:bg-white/5'
-                                }`}
+                            onClick={() => window.open(`/?output=${selectedProjector}`, `P${selectedProjector + 1}`, 'width=1280,height=720,menubar=no,toolbar=no,location=no,status=no')}
+                            className="p-1 px-2 rounded bg-white/5 hover:bg-white/10 text-[9px] text-white/50 flex items-center gap-1 transition-all border border-white/5 active:scale-95"
                         >
-                            <div className="flex justify-between items-center w-full">
-                                <span>{i === 0 ? 'P1 (Left)' : i === 1 ? 'P2 (Center)' : 'P3 (Right)'}</span>
-                                <div
-                                    className="p-1.5 hover:bg-white/20 rounded cursor-pointer text-slate-400 hover:text-white"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        window.open(`/?output=${i}`, `P${i + 1}`, 'width=1280,height=720,menubar=no,toolbar=no,location=no,status=no');
-                                    }}
-                                    title="Open Output Window"
-                                >
-                                    <ExternalLink size={14} />
-                                </div>
-                            </div>
-                        </button>
-                    ))}
-                </div>
-
-                {/* LED Bridge Section - Moved for visibility */}
-                <div className="pt-4 border-t border-white/10">
-                    <div className="flex items-center justify-between mb-2">
-                        <div className="flex flex-col">
-                            <span className="text-[10px] uppercase font-bold text-white/40 mb-1">LED Bridge</span>
-                            <div className="flex items-center gap-2">
-                                <div className={`w-2 h-2 rounded-full ${isLedBridgeConnected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`} />
-                                <span className={`text-[10px] font-mono ${isLedBridgeConnected ? 'text-green-400' : 'text-red-400'}`}>
-                                    {isLedBridgeConnected ? 'CONNECTED' : 'DISCONNECTED'}
-                                </span>
-                            </div>
-                        </div>
-                        <button
-                            onClick={() => setIsLedBroadcastEnabled(!isLedBroadcastEnabled)}
-                            className={`px-3 py-1.5 rounded-md text-[9px] font-bold transition-all ${isLedBroadcastEnabled
-                                ? 'bg-blue-600 text-white shadow-[0_0_10px_rgba(37,99,235,0.4)]'
-                                : 'bg-white/5 text-white/40 hover:bg-white/10'
-                                }`}
-                        >
-                            {isLedBroadcastEnabled ? 'BROADCASTING' : 'OFF AIR'}
+                            <ExternalLink size={10} /> OUT #{selectedProjector + 1}
                         </button>
                     </div>
 
-                    <div className="space-y-3 py-3 bg-white/5 rounded-lg p-3 mt-2 border border-white/5">
-                        <div className="flex flex-col gap-2">
-                            <div className="flex justify-between items-center">
-                                <span className="text-[9px] uppercase font-bold text-white/20">Source</span>
-                                <span className="text-[8px] font-mono text-amber-500/50">MIXED (CLEAN)</span>
-                            </div>
-                        </div>
-
-                        <div className="space-y-2 pt-1 border-t border-white/5">
-                            <div className="flex justify-between text-[9px] uppercase">
-                                <span className="text-slate-500">Target Level (0-100%)</span>
-                                <span className="text-amber-500 font-mono">{(ledDataRowY * 100).toFixed(1)}%</span>
-                            </div>
-                            <input
-                                type="range" min="0" max="1" step="0.001"
-                                value={ledDataRowY}
-                                onChange={(e) => setLedDataRowY(parseFloat(e.target.value))}
-                                className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                            />
-                            <div className="flex items-center justify-between pt-1">
-                                <div className="text-[8px] text-slate-600 italic leading-tight flex-1">
-                                    * Real-time 1920px → 180px average filtering (10px window).
-                                </div>
-                                <button
-                                    onClick={() => setIsLedFlipped(!isLedFlipped)}
-                                    className={`px-2 py-0.5 rounded text-[8px] font-bold border ${isLedFlipped ? 'bg-amber-500/10 border-amber-500/50 text-amber-500' : 'border-white/10 text-white/30 hover:bg-white/5'}`}
-                                >
-                                    REVERSE ORDER
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="mt-3 pt-3 border-t border-white/5">
-                            <div className="text-[9px] uppercase font-bold text-white/20 mb-2">Live Loop Monitor</div>
-                            <div className="relative rounded overflow-hidden bg-black aspect-video border border-white/10">
-                                <canvas
-                                    ref={sourceMonitorRef}
-                                    width="200" height="112"
-                                    className="w-full h-full"
-                                />
-                                <div className="absolute top-1 left-1 bg-black/60 px-1 rounded text-[7px] text-white/50 uppercase font-mono">
-                                    Raw Source
-                                </div>
-                            </div>
-                            <div className="text-[8px] text-slate-600 mt-1 italic">
-                                * Blue line shows clean video sampling coordinates.
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-
-                {/* Mode Control */}
-                <div>
-                    <h2 className="text-xs font-bold text-slate-500 uppercase mb-2">Warp Mode</h2>
-                    <div className="flex bg-slate-800 rounded p-1">
-                        {(['linear', 'bicubic'] as const).map(mode => (
+                    <div className="flex bg-black/40 p-1 rounded-xl border border-white/5 shadow-inner">
+                        {projectors.map((_, i) => (
                             <button
-                                key={mode}
-                                onClick={() => setMode(mode)}
-                                className={`flex-1 py-1.5 text-xs uppercase font-bold rounded ${projectors[selectedProjector].mode === mode
-                                    ? 'bg-amber-500 text-black shadow'
-                                    : 'text-slate-500 hover:text-slate-300'
+                                key={i}
+                                onClick={() => setSelectedProjector(i)}
+                                className={`flex-1 flex flex-col items-center justify-center py-2.5 rounded-lg transition-all duration-300 relative group ${selectedProjector === i
+                                    ? 'bg-amber-500 text-black shadow-[0_0_15px_rgba(245,158,11,0.3)]'
+                                    : 'text-slate-500 hover:bg-white/5 hover:text-white'
                                     }`}
                             >
-                                {mode === 'linear' ? 'Quad' : 'Bezier'}
+                                <span className={`text-[11px] font-black ${selectedProjector === i ? 'scale-110' : ''}`}>
+                                    {i + 1}
+                                </span>
+                                <span className="text-[6px] uppercase font-bold opacity-40 group-hover:opacity-100 transition-opacity">
+                                    P{i + 1}
+                                </span>
+                                {selectedProjector === i && (
+                                    <div className="absolute -bottom-1 w-1 h-1 bg-black rounded-full" />
+                                )}
                             </button>
                         ))}
                     </div>
-                    <div className="text-[10px] text-slate-600 mt-2">
-                        {projectors[selectedProjector].mode === 'linear'
-                            ? 'Simple 4-corner perspective warp.'
-                            : 'Advanced Bezier warp with control handles.'}
-                    </div>
                 </div>
 
-                {/* Grid Resolution */}
-                <div>
-                    <h2 className="text-xs font-bold text-slate-500 uppercase mb-3 flex justify-between">
-                        Grid Subdivision
-                        <span className="text-amber-500">{projectors[selectedProjector].cols}x{projectors[selectedProjector].rows}</span>
-                    </h2>
-                    <div className="space-y-2">
-                        <div className="flex items-center justify-between text-[11px] bg-slate-800/50 p-2 rounded border border-white/5">
-                            <span className="text-slate-400">Rows (Y)</span>
-                            <div className="flex gap-1">
-                                <button onClick={() => changeGridResolution(-1, 0)} className="p-1 hover:bg-white/10 rounded"><Minus size={14} /></button>
-                                <button onClick={() => changeGridResolution(1, 0)} className="p-1 hover:bg-white/10 rounded"><Plus size={14} /></button>
-                            </div>
+                <div className="h-px bg-white/5 mx-2" />
+
+                {/* LED Bridge Section - Collapsible */}
+                <div className="space-y-2">
+                    <button
+                        onClick={() => toggleSection('led')}
+                        className="w-full flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase tracking-widest hover:text-white transition-colors py-1 group"
+                    >
+                        <div className="flex items-center gap-2">
+                            <div className={`w-1.5 h-1.5 rounded-full ${isLedBridgeConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                            LED Bridge
                         </div>
-                        <div className="flex items-center justify-between text-[11px] bg-slate-800/50 p-2 rounded border border-white/5">
-                            <span className="text-slate-400">Cols (X)</span>
-                            <div className="flex gap-1">
-                                <button onClick={() => changeGridResolution(0, -1)} className="p-1 hover:bg-white/10 rounded"><Minus size={14} /></button>
-                                <button onClick={() => changeGridResolution(0, 1)} className="p-1 hover:bg-white/10 rounded"><Plus size={14} /></button>
+                        <ChevronDown size={12} className={`transition-transform duration-300 ${collapsedSections.includes('led') ? '-rotate-90' : ''}`} />
+                    </button>
+
+                    {!collapsedSections.includes('led') && (
+                        <div className="space-y-3 py-3 bg-white/5 rounded-lg p-3 border border-white/5 animate-in fade-in slide-in-from-top-2 duration-300">
+                            <div className="flex items-center justify-between">
+                                <span className="text-[9px] font-bold text-white/20 uppercase">Streaming</span>
+                                <button
+                                    onClick={() => setIsLedBroadcastEnabled(!isLedBroadcastEnabled)}
+                                    className={`px-3 py-1 rounded text-[9px] font-bold transition-all border ${isLedBroadcastEnabled
+                                        ? 'bg-blue-600/20 border-blue-500 text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.2)]'
+                                        : 'bg-white/5 border-white/10 text-white/40 hover:bg-white/10'
+                                        }`}
+                                >
+                                    {isLedBroadcastEnabled ? 'LIVE' : 'OFF AIR'}
+                                </button>
                             </div>
-                        </div>
-                    </div>
-                </div>
 
-
-                {/* Input Mapping */}
-                <div className="p-3 bg-white/5 rounded border border-white/5 space-y-3">
-                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
-                        Input Mapping
-                    </h3>
-
-                    <div className="space-y-3">
-                        {['x', 'width', 'y', 'height'].map(field => (
-                            <div key={field}>
-                                <div className="flex justify-between text-[10px] mb-1 uppercase">
-                                    <span className="text-slate-500">{field}</span>
-                                    <span>{Math.round(projectors[selectedProjector].crop[field as keyof Crop] * 100)}%</span>
+                            <div className="space-y-2 pt-2 border-t border-white/5">
+                                <div className="flex justify-between text-[9px] uppercase">
+                                    <span className="text-slate-500">Target Line</span>
+                                    <span className="text-amber-500 font-mono">{(ledDataRowY * 100).toFixed(1)}%</span>
                                 </div>
                                 <input
-                                    type="range" min={field.includes('width') || field.includes('height') ? 0.01 : 0} max="1" step="0.001"
-                                    value={projectors[selectedProjector].crop[field as keyof Crop]}
-                                    onChange={(e) => updateCrop(field as keyof Crop, parseFloat(e.target.value))}
+                                    type="range" min="0" max="1" step="0.001"
+                                    value={ledDataRowY}
+                                    onChange={(e) => setLedDataRowY(parseFloat(e.target.value))}
                                     className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
                                 />
+                                <div className="flex items-center justify-between pt-1">
+                                    <button
+                                        onClick={() => setIsLedFlipped(!isLedFlipped)}
+                                        className={`px-2 py-0.5 rounded text-[8px] font-bold border transition-colors ${isLedFlipped ? 'bg-amber-500 text-black border-amber-500' : 'border-white/10 text-white/30 hover:bg-white/5'}`}
+                                    >
+                                        REVERSE
+                                    </button>
+                                    <div className="text-[7px] text-slate-600 italic leading-tight text-right uppercase">
+                                        * 10px averaging
+                                    </div>
+                                </div>
                             </div>
-                        ))}
 
-                        <div className="flex gap-4 pt-2">
-                            <label className="flex items-center gap-2 text-[10px] text-slate-400 uppercase cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={projectors[selectedProjector].flipH || false}
-                                    onChange={(e) => {
-                                        const newConfigs = [...projectors];
-                                        newConfigs[selectedProjector].flipH = e.target.checked;
-                                        setProjectors(newConfigs);
-                                    }}
-                                    className="accent-amber-500"
-                                />
-                                Flip H
-                            </label>
-                            <label className="flex items-center gap-2 text-[10px] text-slate-400 uppercase cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={projectors[selectedProjector].flipV || false}
-                                    onChange={(e) => {
-                                        const newConfigs = [...projectors];
-                                        newConfigs[selectedProjector].flipV = e.target.checked;
-                                        setProjectors(newConfigs);
-                                    }}
-                                    className="accent-amber-500"
-                                />
-                                Flip V
-                            </label>
+                            <div className="pt-2 border-t border-white/5">
+                                <div className="relative rounded overflow-hidden bg-black aspect-video border border-white/10 group/mon">
+                                    <canvas ref={sourceMonitorRef} width="200" height="112" className="w-full h-full opacity-60 group-hover/mon:opacity-100 transition-opacity" />
+                                    <div className="absolute top-1 left-1 bg-black/80 px-1 rounded text-[6px] text-white/40 uppercase font-mono">Monitoring</div>
+                                </div>
+                            </div>
                         </div>
-                    </div>
+                    )}
+                </div>
+
+
+                {/* Warp Mode */}
+                <div className="space-y-3">
+                    <button
+                        onClick={() => toggleSection('warp')}
+                        className="w-full flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase tracking-widest hover:text-white transition-colors py-1 group"
+                    >
+                        Warp & Subdivision
+                        <ChevronDown size={12} className={`transition-transform duration-300 ${collapsedSections.includes('warp') ? '-rotate-90' : ''}`} />
+                    </button>
+
+                    {!collapsedSections.includes('warp') && (
+                        <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                            <div className="flex bg-slate-900/50 rounded-lg p-1 border border-white/5">
+                                {(['linear', 'bicubic'] as const).map(mode => (
+                                    <button
+                                        key={mode}
+                                        onClick={() => setMode(mode)}
+                                        className={`flex-1 py-1.5 text-[10px] uppercase font-black rounded-md transition-all ${projectors[selectedProjector].mode === mode
+                                            ? 'bg-amber-500 text-black shadow-lg'
+                                            : 'text-slate-500 hover:text-slate-300'
+                                            }`}
+                                    >
+                                        {mode === 'linear' ? 'Quad' : 'Bezier'}
+                                    </button>
+                                ))}
+                            </div>
+
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between text-[10px] bg-white/5 p-2 rounded-lg border border-white/5">
+                                    <span className="text-slate-400 uppercase font-bold">Grid Rows</span>
+                                    <div className="flex items-center gap-3">
+                                        <button onClick={() => changeGridResolution(-1, 0)} className="p-1 hover:bg-white/10 rounded-full text-amber-500"><Minus size={12} /></button>
+                                        <span className="font-mono text-white text-[11px] w-4 text-center">{projectors[selectedProjector].rows}</span>
+                                        <button onClick={() => changeGridResolution(1, 0)} className="p-1 hover:bg-white/10 rounded-full text-amber-500"><Plus size={12} /></button>
+                                    </div>
+                                </div>
+                                <div className="flex items-center justify-between text-[10px] bg-white/5 p-2 rounded-lg border border-white/5">
+                                    <span className="text-slate-400 uppercase font-bold">Grid Cols</span>
+                                    <div className="flex items-center gap-3">
+                                        <button onClick={() => changeGridResolution(0, -1)} className="p-1 hover:bg-white/10 rounded-full text-amber-500"><Minus size={12} /></button>
+                                        <span className="font-mono text-white text-[11px] w-4 text-center">{projectors[selectedProjector].cols}</span>
+                                        <button onClick={() => changeGridResolution(0, 1)} className="p-1 hover:bg-white/10 rounded-full text-amber-500"><Plus size={12} /></button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* Input Mapping */}
+                <div className="space-y-3">
+                    <button
+                        onClick={() => toggleSection('input')}
+                        className="w-full flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase tracking-widest hover:text-white transition-colors py-1 group"
+                    >
+                        Input Mapping
+                        <ChevronDown size={12} className={`transition-transform duration-300 ${collapsedSections.includes('input') ? '-rotate-90' : ''}`} />
+                    </button>
+
+                    {!collapsedSections.includes('input') && (
+                        <div className="space-y-3 bg-white/5 rounded-lg p-3 border border-white/5 animate-in fade-in slide-in-from-top-2 duration-300">
+                            {['x', 'width', 'y', 'height'].map(field => (
+                                <div key={field}>
+                                    <div className="flex justify-between text-[9px] mb-1 uppercase font-bold">
+                                        <span className="text-slate-500">{field}</span>
+                                        <span className="text-amber-500/80">{Math.round(projectors[selectedProjector].crop[field as keyof Crop] * 100)}%</span>
+                                    </div>
+                                    <input
+                                        type="range" min={field.includes('width') || field.includes('height') ? 0.01 : 0} max="1" step="0.001"
+                                        value={projectors[selectedProjector].crop[field as keyof Crop]}
+                                        onChange={(e) => updateCrop(field as keyof Crop, parseFloat(e.target.value))}
+                                        className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                                    />
+                                </div>
+                            ))}
+
+                            <div className="flex gap-4 pt-2 border-t border-white/5">
+                                {['flipH', 'flipV'].map(f => (
+                                    <label key={f} className="flex items-center gap-2 text-[9px] text-slate-500 uppercase font-bold cursor-pointer hover:text-white transition-colors">
+                                        <input
+                                            type="checkbox"
+                                            checked={projectors[selectedProjector][f as 'flipH' | 'flipV'] || false}
+                                            onChange={(e) => {
+                                                const newConfigs = [...projectors];
+                                                newConfigs[selectedProjector][f as 'flipH' | 'flipV'] = e.target.checked;
+                                                setProjectors(newConfigs);
+                                            }}
+                                            className="accent-amber-500"
+                                        />
+                                        {f.replace('flip', 'Flip ')}
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Edge Blending */}
-                <div className="p-3 bg-white/5 rounded border border-white/5 space-y-3">
-                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                <div className="space-y-3">
+                    <button
+                        onClick={() => toggleSection('blend')}
+                        className="w-full flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase tracking-widest hover:text-white transition-colors py-1 group"
+                    >
                         Edge Blending
-                    </h3>
-                    <div className="space-y-3">
-                        {['left', 'right', 'top', 'bottom'].map(side => (
-                            <div key={side}>
-                                <div className="flex justify-between text-[10px] mb-1 uppercase">
-                                    <span className="text-slate-500">{side}</span>
-                                    <span>{Math.round((projectors[selectedProjector].edgeBlend[side as keyof EdgeBlendConfig] as number) * 100)}%</span>
-                                </div>
-                                <input
-                                    type="range" min="0" max="0.5" step="0.01"
-                                    value={projectors[selectedProjector].edgeBlend[side as keyof EdgeBlendConfig]}
-                                    onChange={(e) => {
-                                        const newConfigs = [...projectors];
-                                        newConfigs[selectedProjector].edgeBlend = {
-                                            ...newConfigs[selectedProjector].edgeBlend,
-                                            [side]: parseFloat(e.target.value)
-                                        };
-                                        const r = rendererRef.current;
-                                        if (r) {
-                                            r.updateEdgeBlend(selectedProjector, newConfigs[selectedProjector].edgeBlend);
-                                        }
-                                        setProjectors(newConfigs);
-                                    }}
-                                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                                />
-                            </div>
-                        ))}
+                        <ChevronDown size={12} className={`transition-transform duration-300 ${collapsedSections.includes('blend') ? '-rotate-90' : ''}`} />
+                    </button>
 
-                        {/* Gamma Slider */}
-                        <div>
-                            <div className="flex justify-between text-[10px] mb-1 uppercase">
-                                <span className="text-slate-500">Smoothness (Gamma)</span>
-                                <span>{projectors[selectedProjector].edgeBlend.gamma || 1.0}</span>
+                    {!collapsedSections.includes('blend') && (
+                        <div className="p-3 bg-white/5 rounded-lg border border-white/5 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                            <div className="space-y-3">
+                                {['left', 'right', 'top', 'bottom'].map(side => (
+                                    <div key={side}>
+                                        <div className="flex justify-between text-[10px] mb-1 uppercase">
+                                            <span className="text-slate-500">{side}</span>
+                                            <span>{Math.round((projectors[selectedProjector].edgeBlend[side as keyof EdgeBlendConfig] as number) * 100)}%</span>
+                                        </div>
+                                        <input
+                                            type="range" min="0" max="0.5" step="0.01"
+                                            value={projectors[selectedProjector].edgeBlend[side as keyof EdgeBlendConfig]}
+                                            onChange={(e) => {
+                                                const newConfigs = [...projectors];
+                                                newConfigs[selectedProjector].edgeBlend = {
+                                                    ...newConfigs[selectedProjector].edgeBlend,
+                                                    [side]: parseFloat(e.target.value)
+                                                };
+                                                const r = rendererRef.current;
+                                                if (r) {
+                                                    r.updateEdgeBlend(selectedProjector, newConfigs[selectedProjector].edgeBlend);
+                                                }
+                                                setProjectors(newConfigs);
+                                            }}
+                                            className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                                        />
+                                    </div>
+                                ))}
+
+                                {/* Gamma Slider */}
+                                <div>
+                                    <div className="flex justify-between text-[10px] mb-1 uppercase">
+                                        <span className="text-slate-500">Smoothness (Gamma)</span>
+                                        <span>{projectors[selectedProjector].edgeBlend.gamma || 1.0}</span>
+                                    </div>
+                                    <input
+                                        type="range" min="0.1" max="4.0" step="0.1"
+                                        value={projectors[selectedProjector].edgeBlend.gamma || 1.0}
+                                        onChange={(e) => {
+                                            const newConfigs = [...projectors];
+                                            const val = parseFloat(e.target.value);
+                                            newConfigs[selectedProjector].edgeBlend = {
+                                                ...newConfigs[selectedProjector].edgeBlend,
+                                                gamma: val
+                                            };
+                                            const r = rendererRef.current;
+                                            if (r) {
+                                                r.updateEdgeBlend(selectedProjector, newConfigs[selectedProjector].edgeBlend);
+                                            }
+                                            setProjectors(newConfigs);
+                                        }}
+                                        className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                                    />
+                                </div>
                             </div>
-                            <input
-                                type="range" min="0.1" max="4.0" step="0.1"
-                                value={projectors[selectedProjector].edgeBlend.gamma || 1.0}
-                                onChange={(e) => {
-                                    const newConfigs = [...projectors];
-                                    const val = parseFloat(e.target.value);
-                                    newConfigs[selectedProjector].edgeBlend = {
-                                        ...newConfigs[selectedProjector].edgeBlend,
-                                        gamma: val
-                                    };
-                                    const r = rendererRef.current;
-                                    if (r) {
-                                        r.updateEdgeBlend(selectedProjector, newConfigs[selectedProjector].edgeBlend);
-                                    }
-                                    setProjectors(newConfigs);
-                                }}
-                                className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                            />
                         </div>
-                    </div>
+                    )}
                 </div>
+
+                <div className="h-px bg-white/5 mx-2" />
 
                 {/* Playlist Status */}
                 <div className="p-3 bg-white/5 rounded border border-white/5 space-y-4">
