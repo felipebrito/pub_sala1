@@ -340,7 +340,8 @@ export default function App() {
     // Hardcoded Fixed Videos
     useEffect(() => {
         // Initialize with fixed videos if not set
-        setIdleVideoUrl('/videos/idle_loop.mp4');
+        // Use Big Buck Bunny for Idle default to ensure signal if local file missing
+        setIdleVideoUrl('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4');
         setMainVideoUrl('/videos/main_content.mp4');
     }, []);
 

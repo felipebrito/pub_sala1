@@ -247,12 +247,18 @@ export class ThreeRenderer {
     private animate = () => {
         this.animationId = requestAnimationFrame(this.animate);
 
+        // Update Textures
+        // Note: VideoTexture generally handles this, but explicit update helps with hot-swapping sources
+        // if (this.textureA) this.textureA.needsUpdate = true; // VideoTexture handles this internally usually
+        // if (this.textureB) this.textureB.needsUpdate = true;
+
         for (let i = 0; i < 3; i++) {
             const renderer = this.renderers[i];
             const camera = this.cameras[i];
             const scene = this.scenes[i];
 
             if (renderer && scene && camera) {
+                // Resize check if needed? No, resize handled by event.
                 renderer.render(scene, camera);
             }
         }
