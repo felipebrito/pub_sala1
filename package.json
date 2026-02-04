@@ -6,15 +6,19 @@
     "scripts": {
         "dev": "vite",
         "build": "tsc && vite build",
-        "preview": "vite preview"
+        "preview": "vite preview",
+        "osc": "node server/osc-bridge.js"
     },
     "dependencies": {
         "@types/three": "^0.182.0",
         "clsx": "^2.1.0",
         "framer-motion": "^10.16.4",
         "lucide-react": "^0.300.0",
+        "node-osc": "^11.2.2",
         "react": "^18.2.0",
         "react-dom": "^18.2.0",
+        "socket.io": "^4.8.3",
+        "socket.io-client": "^4.8.3",
         "tailwind-merge": "^2.2.1",
         "three": "^0.182.0"
     },

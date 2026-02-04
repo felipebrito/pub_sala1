@@ -95,6 +95,8 @@ export class ThreeRenderer {
         if (videoA && (!this.textureA || this.textureA.image !== videoA)) {
             if (this.textureA) this.textureA.dispose();
             console.log('[ThreeRenderer] Setting Video A:', videoA.currentSrc);
+            // Ensure CORS is set before texture creation to avoid SecurityError
+            if (videoA.crossOrigin !== 'anonymous') videoA.crossOrigin = 'anonymous';
             this.textureA = new THREE.VideoTexture(videoA);
             this.textureA.colorSpace = THREE.SRGBColorSpace;
             this.textureA.minFilter = THREE.LinearFilter;
@@ -105,6 +107,8 @@ export class ThreeRenderer {
         if (videoB && (!this.textureB || this.textureB.image !== videoB)) {
             if (this.textureB) this.textureB.dispose();
             console.log('[ThreeRenderer] Setting Video B:', videoB.currentSrc);
+            // Ensure CORS is set before texture creation
+            if (videoB.crossOrigin !== 'anonymous') videoB.crossOrigin = 'anonymous';
             this.textureB = new THREE.VideoTexture(videoB);
             this.textureB.colorSpace = THREE.SRGBColorSpace;
             this.textureB.minFilter = THREE.LinearFilter;

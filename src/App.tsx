@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { ThreeRenderer } from './core/ThreeRenderer'
 import { TEST_VIDEOS } from './constants/videos';
 import { Play, Pause, Grid3X3, MousePointer2, ExternalLink, RotateCcw } from 'lucide-react'
+import { io } from 'socket.io-client';
 
 // Types
 interface Point { x: number; y: number }
@@ -352,16 +353,10 @@ export default function App() {
     // Video State
     const [isPlaying, setIsPlaying] = useState(false);
 
-    // Hardcoded Fixed Videos
-    useEffect(() => {
-        // Initialize with fixed videos if not set
-        setIdleVideoUrl('/videos/idle_loop.mp4');
-        setMainVideoUrl('/videos/main_content.mp4');
-    }, []);
-
     // Playlist State (Idle + Main)
-    const [idleVideoUrl, setIdleVideoUrl] = useState<string>('');
-    const [mainVideoUrl, setMainVideoUrl] = useState<string>('');
+    // Initialize with default videos directly to avoid "Empty src" errors
+    const [idleVideoUrl, setIdleVideoUrl] = useState<string>('/videos/idle_loop.mp4');
+    const [mainVideoUrl, setMainVideoUrl] = useState<string>('/videos/main_content.mp4');
     const [playbackState, setPlaybackState] = useState<'IDLE' | 'MAIN' | 'TRANSITION'>('IDLE');
     const [mixValue, setMixValue] = useState(0); // 0 = Idle, 1 = Main
 
@@ -396,6 +391,19 @@ export default function App() {
             rendererRef.current = null;
         };
     }, []);
+
+    // 4. Update Renderer on Config Change (Crop/Warp)
+    useEffect(() => {
+        if (!rendererRef.current) return;
+        projectors.forEach((proj, i) => {
+            rendererRef.current?.updateInputCrop(i, proj.crop);
+            if (proj.edgeBlend) rendererRef.current?.updateEdgeBlend(i, proj.edgeBlend);
+            // We usually update grid on Drag, but this ensures non-drag updates (undo/reset) work
+            rendererRef.current?.updateGridWarp(i, proj.grid, proj.rows, proj.cols, proj.mode);
+        });
+        // Save to LocalStorage
+        localStorage.setItem('lumina-config-v4', JSON.stringify(projectors));
+    }, [projectors]);
 
     // Crossfade Logic
     const fadeTo = (target: 'IDLE' | 'MAIN') => {
@@ -456,6 +464,43 @@ export default function App() {
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
     }, [playbackState]);
+
+    // OSC Command Listener
+    useEffect(() => {
+        const socket = io('http://localhost:3001');
+
+        socket.on('connect', () => {
+            console.log("Connected to OSC Bridge");
+        });
+
+        socket.on('osc-command', (data: { command: string, args: any[] }) => {
+            console.log("OSC Command Received:", data.command);
+
+            // Only handle commands via FadeTo logic where appropriate
+            if (data.command === 'main' && playbackState === 'IDLE') {
+                fadeTo('MAIN');
+            } else if (data.command === 'idle' && playbackState === 'MAIN') {
+                fadeTo('IDLE');
+            } else if (data.command === 'play') {
+                if (idleVideoRef.current) idleVideoRef.current.play().catch(console.error);
+                if (mainVideoRef.current) mainVideoRef.current.play().catch(console.error);
+            } else if (data.command === 'pause') {
+                if (idleVideoRef.current) idleVideoRef.current.pause();
+                if (mainVideoRef.current) mainVideoRef.current.pause();
+            } else if (data.command === 'stop') {
+                if (idleVideoRef.current) { idleVideoRef.current.pause(); idleVideoRef.current.currentTime = 0; }
+                if (mainVideoRef.current) { mainVideoRef.current.pause(); mainVideoRef.current.currentTime = 0; }
+                fadeTo('IDLE'); // Reset to Start state
+            }
+        });
+
+        return () => {
+            socket.disconnect();
+        };
+    }, [playbackState]); // Re-connect/bind when state changes to capture correct closure logic? 
+    // Actually, fadeTo is stable in scope, but playbackState inside fadeTo logic is closure-captured if not updated.
+    // However, fadeTo implementation uses setters, so it's strictly functional. But the `if` checks above use `playbackState`.
+    // So dependency is correct.
 
     // Use a Ref for mixValue to avoid re-creating the interval constantly
     const mixValueRef = useRef(mixValue);
