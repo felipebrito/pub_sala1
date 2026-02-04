@@ -150,6 +150,7 @@ const OutputWindow = ({ index }: { index: number }) => {
                         setConfig(conf);
                         r.updateInputCrop(index, conf.crop);
                         r.updateGridWarp(index, conf.grid, conf.rows, conf.cols, conf.mode);
+                        if (conf.edgeBlend) r.updateEdgeBlend(index, conf.edgeBlend);
                     }
                 } catch (e) { console.error('Config parse error', e); }
             }
