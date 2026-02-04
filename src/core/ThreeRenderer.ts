@@ -22,7 +22,8 @@ export class ThreeRenderer {
     private scenes: (THREE.Scene | null)[] = [null, null, null];
     private cameras: (THREE.OrthographicCamera | null)[] = [null, null, null];
     private meshes: (THREE.Mesh | null)[] = [null, null, null];
-    private texture: THREE.VideoTexture | null = null;
+    private textureA: THREE.VideoTexture | null = null;
+    private textureB: THREE.VideoTexture | null = null;
     private animationId: number | null = null;
 
     // Masking Resources (Per Projector)
@@ -79,7 +80,7 @@ export class ThreeRenderer {
             uvAttribute.needsUpdate = true;
 
             const material = new EdgeBlendMaterial();
-            if (this.texture) material.map = this.texture;
+            if (this.textureA) material.map = this.textureA;
 
             const mesh = new THREE.Mesh(geometry, material);
             scene.add(mesh);
@@ -89,20 +90,44 @@ export class ThreeRenderer {
         this.animate();
     }
 
-    public setVideo(video: HTMLVideoElement) {
-        if (!video) return;
-        if (this.texture) this.texture.dispose();
+    public setVideos(videoA: HTMLVideoElement | null, videoB: HTMLVideoElement | null) {
+        // Handle Video A
+        if (videoA && (!this.textureA || this.textureA.image !== videoA)) {
+            if (this.textureA) this.textureA.dispose();
+            if (this.textureB) this.textureB.dispose();
+            console.log('[ThreeRenderer] Setting Video A:', videoA.currentSrc);
+            this.textureA = new THREE.VideoTexture(videoA);
+            this.textureA.colorSpace = THREE.SRGBColorSpace;
+            this.textureA.minFilter = THREE.LinearFilter;
+            this.textureA.magFilter = THREE.LinearFilter;
+        }
 
-        console.log('[ThreeRenderer] Setting new video texture:', video.currentSrc);
-        this.texture = new THREE.VideoTexture(video);
-        this.texture.colorSpace = THREE.SRGBColorSpace;
-        this.texture.minFilter = THREE.LinearFilter;
-        this.texture.magFilter = THREE.LinearFilter;
-        // Make sure texture is available to all shaders
+        // Handle Video B
+        if (videoB && (!this.textureB || this.textureB.image !== videoB)) {
+            if (this.textureB) this.textureB.dispose();
+            console.log('[ThreeRenderer] Setting Video B:', videoB.currentSrc);
+            this.textureB = new THREE.VideoTexture(videoB);
+            this.textureB.colorSpace = THREE.SRGBColorSpace;
+            this.textureB.minFilter = THREE.LinearFilter;
+            this.textureB.magFilter = THREE.LinearFilter;
+        }
+
+        // Update Meshes
         this.meshes.forEach(mesh => {
             if (mesh) {
                 const material = mesh.material as EdgeBlendMaterial;
-                material.map = this.texture;
+                if (this.textureA) material.map = this.textureA;
+                if (this.textureB) material.map2 = this.textureB;
+                material.needsUpdate = true;
+            }
+        });
+    }
+
+    public setCrossfade(mix: number) {
+        this.meshes.forEach(mesh => {
+            if (mesh) {
+                const material = mesh.material as EdgeBlendMaterial;
+                material.mixVideo = mix;
                 material.needsUpdate = true;
             }
         });

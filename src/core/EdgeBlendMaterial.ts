@@ -3,6 +3,8 @@ import * as THREE from 'three';
 export const EdgeBlendShader = {
     uniforms: {
         map: { value: null },
+        map2: { value: null },
+        mixVideo: { value: 0.0 }, // 0.0 = map, 1.0 = map2
         blendLeft: { value: 0.0 },
         blendRight: { value: 0.0 },
         blendTop: { value: 0.0 },
@@ -19,6 +21,9 @@ export const EdgeBlendShader = {
     `,
     fragmentShader: `
         uniform sampler2D map;
+        uniform sampler2D map2;
+        uniform float mixVideo;
+        
         uniform float blendLeft;
         uniform float blendRight;
         uniform float blendTop;
@@ -35,7 +40,11 @@ export const EdgeBlendShader = {
         }
 
         void main() {
-            vec4 color = texture2D(map, vUv);
+            vec4 c1 = texture2D(map, vUv);
+            vec4 c2 = texture2D(map2, vUv);
+
+            // Mix the two video sources
+            vec4 color = mix(c1, c2, mixVideo);
             
             // Calculate LOCAL UV (0..1) relative to crop
             // uLocal = (globalU - uMin) / (uMax - uMin)
@@ -83,10 +92,7 @@ export const EdgeBlendShader = {
                   }
              }
             
-            // Apply Factor to RGB. Alpha channel doesn't matter for projection on wall, 
-            // but matters if three.js rendering context is transparent? 
-            // Projectors map Black to "Off". So modifying RGB is correct.
-            
+            // Apply Factor to RGB
             gl_FragColor = vec4(color.rgb * alpha, 1.0); 
         }
     `
@@ -104,5 +110,13 @@ export class EdgeBlendMaterial extends THREE.ShaderMaterial {
 
     set map(texture: THREE.Texture | null) {
         this.uniforms.map.value = texture;
+    }
+
+    set map2(texture: THREE.Texture | null) {
+        this.uniforms.map2.value = texture;
+    }
+
+    set mixVideo(val: number) {
+        this.uniforms.mixVideo.value = val;
     }
 }

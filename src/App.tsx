@@ -14,6 +14,9 @@ interface ProjectorConfig {
     crop: Crop;
     edgeBlend: EdgeBlendConfig;
     mode: 'linear' | 'bicubic'; // visualization/interaction mode: linear=Quad (2x2), bicubic=Bezier (Handles)
+    flipH?: boolean;
+    flipV?: boolean;
+    masks?: { id: string; points: Point[] }[];
 }
 
 // Helper: Equidistant Grid
@@ -105,7 +108,10 @@ const LOCAL_VIDEOS: { title: string; filename: string }[] = [
 const OutputWindow = ({ index }: { index: number }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasWrapperRef = useRef<HTMLDivElement>(null);
-    const videoRef = useRef<HTMLVideoElement>(null);
+    // Dual Video Refs for Output
+    const idleVideoRef = useRef<HTMLVideoElement>(null);
+    const mainVideoRef = useRef<HTMLVideoElement>(null);
+
     const rendererRef = useRef<ThreeRenderer | null>(null);
     const [config, setConfig] = useState<ProjectorConfig | null>(null);
     const [isFs, setIsFs] = useState(false);
@@ -146,13 +152,8 @@ const OutputWindow = ({ index }: { index: number }) => {
         const r = new ThreeRenderer([{ index, container: canvasWrapperRef.current }]);
         rendererRef.current = r;
 
-        // Force set video if already ready (Fix race condition where onCanPlay updates before renderer is ready)
-        if (videoRef.current && videoRef.current.readyState >= 1) {
-            r.setVideo(videoRef.current);
-        }
-
-        // Sync Function
-        const sync = () => {
+        // Sync Function for Config
+        const syncConfig = () => {
             const str = localStorage.getItem('lumina-config-v4');
             if (str) {
                 try {
@@ -166,25 +167,15 @@ const OutputWindow = ({ index }: { index: number }) => {
                     }
                 } catch (e) { console.error('Config parse error', e); }
             }
-
-            const vUrl = localStorage.getItem('lumina-video-url');
-            if (vUrl && videoRef.current) {
-                if (videoRef.current.src !== vUrl && vUrl !== '') {
-                    videoRef.current.src = vUrl;
-                    videoRef.current.load();
-                } else if (vUrl !== '' && videoRef.current.paused) {
-                    videoRef.current.play().catch(() => { });
-                }
-            }
         };
 
-        sync();
-        window.addEventListener('storage', sync);
+        syncConfig();
+        window.addEventListener('storage', syncConfig);
 
         return () => {
             r.dispose();
             rendererRef.current = null;
-            window.removeEventListener('storage', sync);
+            window.removeEventListener('storage', syncConfig);
             window.removeEventListener('mousemove', onMove);
             window.removeEventListener('keydown', onKey);
             document.removeEventListener('fullscreenchange', onFs);
@@ -198,41 +189,68 @@ const OutputWindow = ({ index }: { index: number }) => {
                 // Resize Renderer to match Wrapper (which is 100% of window)
                 const w = window.innerWidth;
                 const h = window.innerHeight;
-                rendererRef.current.resize(index, w, h);
+                // rendererRef.current.resize(index, w, h); // Auto-resize in animate loop now
             }
         };
-        // Trigger once on mount/new renderer
         handleResize();
-
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
     }, [index]);
 
-    // Sync Slave
+    // Sync Slave (Updated for Dual Video)
     useEffect(() => {
         const channel = new BroadcastChannel('lumina_sync');
         channel.postMessage({ type: 'HELLO' });
         channel.onmessage = (e) => {
-            if (e.data.type === 'SYNC' && videoRef.current) {
-                const { time, paused, src } = e.data;
-                const v = videoRef.current;
+            if (e.data.type === 'SYNC') {
+                const { idleSrc, mainSrc, idleTime, mainTime, idlePaused, mainPaused, mix } = e.data;
 
-                // Sync Source (if provided, changed, and not a local blob)
-                // Note: local blobs cannot be synced across windows easily without re-streaming
-                if (src && src !== v.src && !src.startsWith('blob:')) {
-                    console.log("Syncing source:", src);
-                    v.src = src;
+                // Sync Videos
+                if (idleVideoRef.current) {
+                    const v = idleVideoRef.current;
+                    if (idleSrc && v.src !== new URL(idleSrc, window.location.href).href) v.src = idleSrc;
+                    if (Math.abs(v.currentTime - idleTime) > 0.3) v.currentTime = idleTime;
+                    if (idlePaused && !v.paused) v.pause();
+                    if (!idlePaused && v.paused) v.play().catch(() => { });
                 }
 
-                // Only sync time if significant drift
-                if (Math.abs(v.currentTime - time) > 0.3) {
-                    v.currentTime = time;
+                if (mainVideoRef.current) {
+                    const v = mainVideoRef.current;
+                    if (mainSrc && v.src !== new URL(mainSrc, window.location.href).href) v.src = mainSrc;
+                    if (Math.abs(v.currentTime - mainTime) > 0.3) v.currentTime = mainTime;
+                    if (mainPaused && !v.paused) v.pause();
+                    if (!mainPaused && v.paused) v.play().catch(() => { });
                 }
-                if (paused && !v.paused) v.pause();
-                if (!paused && v.paused) v.play().catch(() => { });
+
+                // Sync Mix
+                if (rendererRef.current) {
+                    rendererRef.current.setCrossfade(mix);
+                }
             }
         };
         return () => channel.close();
+    }, []);
+
+    // Ensure Renderer has video references
+    useEffect(() => {
+        if (rendererRef.current && idleVideoRef.current && mainVideoRef.current) {
+            // Init with whatever is there, logic inside setVideos handles updates
+            // But we need to make sure they are set at least once
+            const updateVideos = () => {
+                rendererRef.current?.setVideos(idleVideoRef.current, mainVideoRef.current);
+            };
+            // Retry a few times or wait for load?
+            // Since they are fixed refs, we can just set them.
+            updateVideos();
+
+            // Also add listeners to update when metadata loads if needed, but setVideos logic checks image reference
+            idleVideoRef.current.addEventListener('canplay', updateVideos);
+            mainVideoRef.current.addEventListener('canplay', updateVideos);
+            return () => {
+                idleVideoRef.current?.removeEventListener('canplay', updateVideos);
+                mainVideoRef.current?.removeEventListener('canplay', updateVideos);
+            }
+        }
     }, []);
 
     return (
@@ -251,8 +269,8 @@ const OutputWindow = ({ index }: { index: number }) => {
                     ...(aspectLock ? {
                         width: '100%',
                         height: '100%',
-                        maxWidth: '177.78vh', // 16:9 aspect ratio (16/9 * 100vh)
-                        maxHeight: '56.25vw', // 16:9 aspect ratio (9/16 * 100vw)
+                        maxWidth: '177.78vh',
+                        maxHeight: '56.25vw',
                         aspectRatio: '16/9',
                         position: 'relative'
                     } : {
@@ -265,26 +283,9 @@ const OutputWindow = ({ index }: { index: number }) => {
                 }}
             />
 
-            <video
-                ref={videoRef}
-                crossOrigin="anonymous"
-                loop
-                muted
-                playsInline
-                autoPlay
-                onTimeUpdate={(e) => {
-                    // Sync time display if needed? No, output window purely renders.
-                    // But if we want to debug seek:
-                    // console.log(e.currentTarget.currentTime);
-                }}
-                onCanPlay={() => {
-                    if (videoRef.current && rendererRef.current) {
-                        videoRef.current.play().catch(e => console.warn(e));
-                        rendererRef.current.setVideo(videoRef.current);
-                    }
-                }}
-                style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }}
-            />
+            {/* Hidden Video Elements for Output */}
+            <video ref={idleVideoRef} crossOrigin="anonymous" loop muted playsInline style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }} />
+            <video ref={mainVideoRef} crossOrigin="anonymous" muted playsInline style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }} />
 
             <div className="absolute top-4 left-4 text-white/50 text-xs font-mono opacity-50 select-none z-50 pointer-events-none mix-blend-difference">
                 OUTPUT {index + 1} {aspectLock && '[16:9 LOCKED]'}
@@ -335,130 +336,131 @@ export default function App() {
 
     // Video State
     const [isPlaying, setIsPlaying] = useState(false);
-    const [videoUrl, setVideoUrl] = useState(() => {
-        const saved = localStorage.getItem('lumina-video-url') || '';
-        return saved.startsWith('blob:') ? '' : saved;
-    });
+
+    // Hardcoded Fixed Videos
+    useEffect(() => {
+        // Initialize with fixed videos if not set
+        setIdleVideoUrl('/videos/idle_loop.mp4');
+        setMainVideoUrl('/videos/main_content.mp4');
+    }, []);
 
     // Playlist State (Idle + Main)
     const [idleVideoUrl, setIdleVideoUrl] = useState<string>('');
     const [mainVideoUrl, setMainVideoUrl] = useState<string>('');
-    const [playbackState, setPlaybackState] = useState<'IDLE' | 'MAIN'>('IDLE');
+    const [playbackState, setPlaybackState] = useState<'IDLE' | 'MAIN' | 'TRANSITION'>('IDLE');
+    const [mixValue, setMixValue] = useState(0); // 0 = Idle, 1 = Main
 
     // Refs
     const rendererRef = useRef<ThreeRenderer | null>(null);
-    const videoRef = useRef<HTMLVideoElement | null>(null);
+    const idleVideoRef = useRef<HTMLVideoElement | null>(null);
+    const mainVideoRef = useRef<HTMLVideoElement | null>(null);
     const containerRefs = [useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null)];
+
     // We use a REF for selection to ensure Drag/Move has latest without re-attaching listeners constantly
     const selectionRef = useRef<{ r: number, c: number }[]>([]);
     useEffect(() => { selectionRef.current = selectedPoints }, [selectedPoints]);
 
-    // Sync Master
+    // Crossfade Logic
+    const fadeTo = (target: 'IDLE' | 'MAIN') => {
+        const start = performance.now();
+        const duration = 2000; // 2 seconds fade
+        const startMix = target === 'MAIN' ? 0 : 1;
+        const endMix = target === 'MAIN' ? 1 : 0;
+
+        // Ensure target video is playing
+        if (target === 'MAIN' && mainVideoRef.current) {
+            mainVideoRef.current.currentTime = 0;
+            mainVideoRef.current.play().catch(console.error);
+        } else if (target === 'IDLE' && idleVideoRef.current) {
+            idleVideoRef.current.play().catch(console.error);
+        }
+
+        setPlaybackState('TRANSITION');
+
+        const animate = (time: number) => {
+            const elapsed = time - start;
+            const progress = Math.min(elapsed / duration, 1);
+
+            // Ease in-out
+            const ease = progress < .5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
+
+            const currentMix = startMix + (endMix - startMix) * ease;
+            setMixValue(currentMix);
+            rendererRef.current?.setCrossfade(currentMix);
+
+            if (progress < 1) {
+                requestAnimationFrame(animate);
+            } else {
+                setMixValue(endMix);
+                setPlaybackState(target);
+                // If went back to IDLE, pause MAIN
+                if (target === 'IDLE' && mainVideoRef.current) {
+                    mainVideoRef.current.pause();
+                }
+            }
+        };
+        requestAnimationFrame(animate);
+    };
+
+    // Keyboard Shortcuts for Trigger
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            // Space or 'T' to trigger Main
+            if ((e.code === 'Space' || e.key.toLowerCase() === 't') && playbackState === 'IDLE') {
+                console.log("Triggering Main Content");
+                fadeTo('MAIN');
+            }
+            // 'I' to force back to Idle
+            if (e.key.toLowerCase() === 'i' && playbackState === 'MAIN') {
+                console.log("Forcing Return to Idle");
+                fadeTo('IDLE');
+            }
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [playbackState]);
+
+    // Sync Master (Dual Video)
     const broadcastSync = () => {
         const channel = new BroadcastChannel('lumina_sync');
-        if (videoRef.current) {
-            channel.postMessage({
-                type: 'SYNC',
-                time: videoRef.current.currentTime,
-                paused: videoRef.current.paused,
-                src: videoRef.current.src
-            });
-        }
+        channel.postMessage({
+            type: 'SYNC',
+            idleSrc: idleVideoRef.current?.src || '',
+            mainSrc: mainVideoRef.current?.src || '',
+            idleTime: idleVideoRef.current?.currentTime || 0,
+            mainTime: mainVideoRef.current?.currentTime || 0,
+            idlePaused: idleVideoRef.current?.paused || false,
+            mainPaused: mainVideoRef.current?.paused || false,
+            mix: mixValue
+        });
         channel.close();
     };
 
     useEffect(() => {
         const channel = new BroadcastChannel('lumina_sync');
         channel.onmessage = (e) => { if (e.data.type === 'HELLO') broadcastSync(); };
-        const interval = setInterval(broadcastSync, 1000);
+        const interval = setInterval(broadcastSync, 500); // Sync more frequently for mix
         return () => { clearInterval(interval); channel.close(); };
-    }, []);
+    }, [mixValue]);
 
-    // --- Effects ---
-
-    // 1. Initialize Renderer
+    // 3. Video Handling - Update Renderer with current Refs
     useEffect(() => {
-        if (containerRefs[0].current && containerRefs[1].current && containerRefs[2].current && !rendererRef.current) {
-            rendererRef.current = new ThreeRenderer([
-                { index: 0, container: containerRefs[0].current! },
-                { index: 1, container: containerRefs[1].current! },
-                { index: 2, container: containerRefs[2].current! }
-            ]);
-
-            // Initial Push
-            projectors.forEach((proj, i) => {
-                rendererRef.current?.updateInputCrop(i, proj.crop);
-                rendererRef.current?.updateGridWarp(i, proj.grid, proj.rows, proj.cols, proj.mode);
-            });
-        }
-        return () => {
-            rendererRef.current?.dispose();
-            rendererRef.current = null;
-        };
-    }, []);
-
-    // 2. Sync Projectors Projectors -> Renderer    // Auto-Save
-    useEffect(() => {
-        localStorage.setItem('lumina-config-v4', JSON.stringify(projectors));
-
         if (!rendererRef.current) return;
+        rendererRef.current.setVideos(idleVideoRef.current, mainVideoRef.current);
+    }, [idleVideoUrl, mainVideoUrl]);
 
-        projectors.forEach((proj, i) => {
-            rendererRef.current?.updateInputCrop(i, proj.crop);
-            rendererRef.current?.updateGridWarp(i, proj.grid, proj.rows, proj.cols, proj.mode);
-            if (proj.edgeBlend) rendererRef.current?.updateEdgeBlend(i, proj.edgeBlend);
-            if (proj.masks) rendererRef.current?.updateMasks(i, proj.masks.map(m => m.points));
-        });
-    }, [projectors]);
-
-    // 3. Video Handling
+    // Auto-Return to Idle when Main ends
     useEffect(() => {
-        // Only save non-blob URLs (blobs don't work across windows)
-        if (videoUrl && !videoUrl.startsWith('blob:')) {
-            localStorage.setItem('lumina-video-url', videoUrl);
-        }
+        const mainInfo = mainVideoRef.current;
+        if (!mainInfo) return;
 
-        if (!videoUrl || !videoRef.current || !rendererRef.current) return;
-
-        const video = videoRef.current;
-        video.src = videoUrl;
-        video.crossOrigin = 'anonymous';
-
-        // Robust Playback Handler
-        const handleCanPlay = () => {
-            if (video.videoWidth === 0) return;
-            rendererRef.current?.setVideo(video);
-
-            // Loop logic: Idle = Loop, Main = One-Shot
-            video.loop = (playbackState === 'IDLE');
-
-            video.play()
-                .then(() => setIsPlaying(true))
-                .catch(e => console.warn("Autoplay blocked/failed", e));
+        const onEnd = () => {
+            console.log("Main Content Ended. Returning to Idle...");
+            fadeTo('IDLE');
         };
-
-        video.addEventListener('canplay', handleCanPlay);
-        return () => video.removeEventListener('canplay', handleCanPlay);
-    }, [videoUrl]); // Intentionally ONLY depends on videoUrl to avoid loops
-
-    // Helper: Safe Video Switching
-    const playVideo = (url: string, state: 'IDLE' | 'MAIN') => {
-        if (!url) return;
-        setPlaybackState(state);
-        setVideoUrl(url); // This triggers the useEffect above
-    };
-
-    // Helper to play a video
-    const playVideo = (url: string, state: 'IDLE' | 'MAIN') => {
-        setVideoUrl(url);
-        setPlaybackState(state);
-        // Set loop based on state
-        setTimeout(() => {
-            if (videoRef.current) {
-                videoRef.current.loop = (state === 'IDLE');
-            }
-        }, 0);
-    };
+        mainInfo.addEventListener('ended', onEnd);
+        return () => mainInfo.removeEventListener('ended', onEnd);
+    }, []);
 
     // --- Logic ---
 
@@ -586,45 +588,25 @@ export default function App() {
         window.addEventListener('mouseup', onUp);
     };
 
-    const togglePlayback = () => {
-        if (!videoRef.current) return;
-        isPlaying ? videoRef.current.pause() : videoRef.current.play();
-        setIsPlaying(!isPlaying);
-    };
-
-    const loadVideo = () => {
-        const url = prompt('Enter video URL:');
-        if (url) setVideoUrl(url);
-    };
-
     return (
         <div className="flex h-screen bg-[#0a0e1a] text-slate-300">
+            {/* Hidden Videos for Controller */}
             <video
-                ref={videoRef}
-                onPlay={broadcastSync}
-                onPause={broadcastSync}
-                onSeeked={broadcastSync}
-                onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-                onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
-                onEnded={() => {
-                    if (playbackState === 'MAIN') {
-                        // Main finished -> Back to Idle
-                        if (idleVideoUrl) {
-                            setVideoUrl(idleVideoUrl);
-                            setPlaybackState('IDLE');
-                            setTimeout(() => {
-                                if (videoRef.current) {
-                                    videoRef.current.loop = true;
-                                    videoRef.current.play();
-                                }
-                            }, 50);
-                        } else {
-                            setIsPlaying(false);
-                        }
-                    }
-                }}
+                ref={idleVideoRef}
+                src={idleVideoUrl}
+                loop
+                muted
+                playsInline
+                onPlay={broadcastSync} onPause={broadcastSync}
                 style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }}
-                playsInline autoPlay muted loop
+            />
+            <video
+                ref={mainVideoRef}
+                src={mainVideoUrl}
+                muted
+                playsInline
+                onPlay={broadcastSync} onPause={broadcastSync}
+                style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }}
             />
 
             <aside className="w-64 bg-[#0f1419] border-r border-white/10 p-6 flex flex-col gap-6 overflow-y-auto z-10 shrink-0">
@@ -799,6 +781,35 @@ export default function App() {
                     </div>
                 </div>
 
+                {/* Playlist Status */}
+                <div className="p-3 bg-white/5 rounded border border-white/5 space-y-4">
+                    <h2 className="text-xs font-bold text-slate-500 uppercase flex justify-between">
+                        Playback Status
+                    </h2>
+                    <div className="text-sm font-mono text-center py-2 bg-black/20 rounded">
+                        STATE: <span className={playbackState === 'MAIN' ? 'text-red-500' : 'text-green-500'}>{playbackState}</span>
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                        Mix Value: {mixValue.toFixed(2)}
+                    </div>
+
+                    {/* Manual Trigger */}
+                    <button
+                        onClick={() => fadeTo('MAIN')}
+                        disabled={playbackState !== 'IDLE'}
+                        className={`w-full py-3 font-bold rounded flex flex-col items-center justify-center ${playbackState !== 'IDLE' ? 'bg-slate-800 text-slate-500' : 'bg-red-600 text-white hover:bg-red-500'}`}
+                    >
+                        <span className="text-sm">TRIGGER MAIN (SPACE)</span>
+                    </button>
+                    <button
+                        onClick={() => fadeTo('IDLE')}
+                        disabled={playbackState === 'IDLE'}
+                        className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-xs text-slate-400 rounded"
+                    >
+                        Force Return to Idle
+                    </button>
+                </div>
+
                 {/* Playlist Control */}
                 <div className="p-3 bg-white/5 rounded border border-white/5 space-y-4">
                     <h2 className="text-xs font-bold text-slate-500 uppercase flex justify-between">
@@ -817,7 +828,12 @@ export default function App() {
                             onChange={(e) => {
                                 if (e.target.value) {
                                     setIdleVideoUrl(e.target.value);
-                                    playVideo(e.target.value, 'IDLE');
+                                    // playVideo(e.target.value, 'IDLE'); // Removed
+                                    if (idleVideoRef.current) {
+                                        idleVideoRef.current.src = e.target.value;
+                                        idleVideoRef.current.loop = true;
+                                        idleVideoRef.current.play().catch(console.error);
+                                    }
                                 }
                             }}
                             className="w-full bg-slate-800 text-white px-2 py-1 rounded text-xs border border-slate-700 hover:border-slate-600"
@@ -845,7 +861,12 @@ export default function App() {
                                     if (e.target.files?.[0]) {
                                         const url = URL.createObjectURL(e.target.files[0]);
                                         setIdleVideoUrl(url);
-                                        playVideo(url, 'IDLE');
+                                        // playVideo(url, 'IDLE'); // Removed
+                                        if (idleVideoRef.current) {
+                                            idleVideoRef.current.src = url;
+                                            idleVideoRef.current.loop = true;
+                                            idleVideoRef.current.play().catch(console.error);
+                                        }
                                     }
                                 }}
                             />
@@ -906,9 +927,10 @@ export default function App() {
                     <button
                         onClick={() => {
                             if (!mainVideoUrl) return alert('No Main Video selected');
-                            setMainVideoUrl(mainVideoUrl);
-                            playVideo(mainVideoUrl, 'MAIN');
-                            if (videoRef.current) videoRef.current.currentTime = 0;
+                            // setMainVideoUrl(mainVideoUrl); // Redundant
+                            // playVideo(mainVideoUrl, 'MAIN'); // Removed
+                            fadeTo('MAIN');
+                            // if (videoRef.current) videoRef.current.currentTime = 0; // Removed
                         }}
                         disabled={!mainVideoUrl}
                         className={`flex-1 py-3 font-bold rounded flex flex-col items-center justify-center ${playbackState === 'MAIN' ? 'bg-red-600 text-white shadow-[0_0_15px_rgba(220,38,38,0.5)]' : 'bg-slate-700 hover:bg-white/10'}`}
@@ -919,7 +941,8 @@ export default function App() {
                     <button
                         onClick={() => {
                             if (!idleVideoUrl) return alert('No Idle Video selected');
-                            playVideo(idleVideoUrl, 'IDLE');
+                            // playVideo(idleVideoUrl, 'IDLE'); // Removed
+                            fadeTo('IDLE');
                         }}
                         disabled={!idleVideoUrl}
                         className="flex-1 py-3 bg-slate-700 hover:bg-white/10 font-bold rounded flex flex-col items-center justify-center"
