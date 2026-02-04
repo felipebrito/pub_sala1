@@ -403,7 +403,7 @@ export default function App() {
     const [playbackState, setPlaybackState] = useState<'IDLE' | 'MAIN' | 'TRANSITION'>('IDLE');
     const [mixValue, setMixValue] = useState(0); // 0 = Idle, 1 = Main
     const [isLedBroadcastEnabled, setIsLedBroadcastEnabled] = useState(false);
-    const [ledSampleMethod, setLedSampleMethod] = useState<'OUTPUT' | 'VIDEO'>('OUTPUT');
+    const [ledSampleMethod, setLedSampleMethod] = useState<'MIXED' | 'IDLE' | 'MAIN'>('MIXED');
     const [ledDataRowLine, setLedDataRowLine] = useState(1081); // Default to last line
     const [ledPreviewData, setLedPreviewData] = useState<Uint8Array | null>(null);
     const [isLedFlipped, setIsLedFlipped] = useState(false);
@@ -646,13 +646,15 @@ export default function App() {
                     // Sample based on method
                     let pixelData: Uint8Array | null = null;
 
-                    if (ledSampleMethod === 'OUTPUT') {
-                        // Sample from MIXED source (Clean video signal, but includes Idle+Main crossfade)
-                        // This ignores warp/crop but follows the crossfade logic
+                    if (ledSampleMethod === 'MIXED') {
+                        // Sample from MIXED source (Follows crossfade A/B)
                         pixelData = rendererRef.current.sampleMixedSource(180, ledDataRowLine, mixValue);
-                    } else {
-                        // Sample directly from the Main Video texture specifically
+                    } else if (ledSampleMethod === 'MAIN') {
+                        // Explicitly Main Video
                         pixelData = rendererRef.current.sampleVideo('main', 180, ledDataRowLine);
+                    } else {
+                        // Explicitly Idle Video
+                        pixelData = rendererRef.current.sampleVideo('idle', 180, ledDataRowLine);
                     }
 
                     if (pixelData) {
@@ -683,7 +685,10 @@ export default function App() {
                             ctx.clearRect(0, 0, monW, monH);
 
                             // Draw the raw sampling row onto the monitor (zoomed in visually)
-                            const video = (ledSampleMethod === 'VIDEO') ? mainVideoRef.current : (mixValue > 0.5 ? mainVideoRef.current : idleVideoRef.current);
+                            let video: HTMLVideoElement | null = null;
+                            if (ledSampleMethod === 'MAIN') video = mainVideoRef.current;
+                            else if (ledSampleMethod === 'IDLE') video = idleVideoRef.current;
+                            else video = (mixValue > 0.5) ? mainVideoRef.current : idleVideoRef.current;
                             if (video && video.readyState >= 2) {
                                 // Draw thumbnail of video
                                 ctx.globalAlpha = 0.5;
@@ -691,13 +696,19 @@ export default function App() {
                                 ctx.globalAlpha = 1.0;
 
                                 // Draw sampling line on thumbnail
-                                const yPos = (ledDataRowLine / 1081) * monH;
+                                const vH = video.videoHeight || 1081;
+                                const yPos = (ledDataRowLine / vH) * monH;
                                 ctx.strokeStyle = '#3b82f6';
                                 ctx.lineWidth = 2;
                                 ctx.beginPath();
                                 ctx.moveTo(0, yPos);
                                 ctx.lineTo(monW, yPos);
                                 ctx.stroke();
+
+                                // Draw labels
+                                ctx.fillStyle = "white";
+                                ctx.font = "8px monospace";
+                                ctx.fillText(`SRC: ${ledSampleMethod}`, 5, 10);
 
                                 // Draw a representative "glow" of the sampled data at the bottom of thumbnail
                                 if (pixelData) {
@@ -993,20 +1004,20 @@ export default function App() {
                     <div className="space-y-3 py-3 bg-white/5 rounded-lg p-3 mt-2 border border-white/5">
                         <div className="flex flex-col gap-2">
                             <span className="text-[9px] uppercase font-bold text-white/20">Source</span>
-                            <div className="flex bg-slate-900/50 rounded p-1">
-                                {(['OUTPUT', 'VIDEO'] as const).map(m => (
+                            <div className="flex bg-slate-900/50 rounded p-1 gap-1">
+                                {(['MIXED', 'IDLE', 'MAIN'] as const).map(m => (
                                     <button
                                         key={m}
                                         onClick={() => setLedSampleMethod(m)}
-                                        className={`flex-1 py-1 text-[9px] rounded transition-all ${ledSampleMethod === m ? 'bg-amber-500 text-black font-bold' : 'text-slate-500 hover:text-white'}`}
+                                        className={`flex-1 py-1 text-[8px] rounded transition-all ${ledSampleMethod === m ? 'bg-amber-500 text-black font-bold' : 'text-slate-400 hover:text-white'}`}
                                     >
-                                        {m === 'OUTPUT' ? 'Mixed (Clean)' : 'Main Only'}
+                                        {m === 'MIXED' ? 'Mixed' : m === 'IDLE' ? 'Idle' : 'Main'}
                                     </button>
                                 ))}
                             </div>
                         </div>
 
-                        {ledSampleMethod === 'VIDEO' && (
+                        {ledSampleMethod !== null && (
                             <div className="space-y-2 pt-1 border-t border-white/5">
                                 <div className="flex justify-between text-[9px] uppercase">
                                     <span className="text-slate-500">Target Line (1-1081)</span>
@@ -1524,7 +1535,7 @@ export default function App() {
                         )}
                     </div>
                     <div className="text-[9px] text-slate-600 font-mono">
-                        {ledSampleMethod === 'VIDEO' ? `Sampling Main Video Line #${ledDataRowLine}` : `Sampling Mixed Signal Line #${ledDataRowLine}`}
+                        Source: {ledSampleMethod} | Line: #{ledDataRowLine}
                     </div>
                 </div>
             </main >
