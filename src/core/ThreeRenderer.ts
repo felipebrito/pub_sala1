@@ -94,7 +94,6 @@ export class ThreeRenderer {
         // Handle Video A
         if (videoA && (!this.textureA || this.textureA.image !== videoA)) {
             if (this.textureA) this.textureA.dispose();
-            if (this.textureB) this.textureB.dispose();
             console.log('[ThreeRenderer] Setting Video A:', videoA.currentSrc);
             this.textureA = new THREE.VideoTexture(videoA);
             this.textureA.colorSpace = THREE.SRGBColorSpace;
@@ -244,7 +243,10 @@ export class ThreeRenderer {
         }
     }
 
+    private isDisposed = false;
+
     private animate = () => {
+        if (this.isDisposed) return;
         this.animationId = requestAnimationFrame(this.animate);
 
         // Update Textures
@@ -265,14 +267,29 @@ export class ThreeRenderer {
     }
 
     public dispose() {
+        this.isDisposed = true;
         if (this.animationId) cancelAnimationFrame(this.animationId);
-        this.renderers.forEach(r => r?.dispose());
+
+        this.renderers.forEach(r => {
+            if (r) {
+                // r.forceContextLoss(); // Optional: force context loss if needed
+                r.dispose();
+                if (r.domElement && r.domElement.parentElement) {
+                    r.domElement.parentElement.removeChild(r.domElement);
+                }
+            }
+        });
+
         this.meshes.forEach(m => {
             if (m) {
                 m.geometry.dispose();
                 (m.material as THREE.Material).dispose();
             }
         });
+
+        if (this.textureA) this.textureA.dispose();
+        if (this.textureB) this.textureB.dispose();
+
         this.renderers = [null, null, null];
         this.scenes = [null, null, null];
         this.meshes = [null, null, null];

@@ -232,26 +232,29 @@ const OutputWindow = ({ index }: { index: number }) => {
     }, []);
 
     // Ensure Renderer has video references
+    // Ensure Renderer has video references
     useEffect(() => {
-        if (rendererRef.current && idleVideoRef.current && mainVideoRef.current) {
-            // Init with whatever is there, logic inside setVideos handles updates
-            // But we need to make sure they are set at least once
-            const updateVideos = () => {
-                rendererRef.current?.setVideos(idleVideoRef.current, mainVideoRef.current);
-            };
-            // Retry a few times or wait for load?
-            // Since they are fixed refs, we can just set them.
-            updateVideos();
+        if (!rendererRef.current) return;
 
-            // Also add listeners to update when metadata loads if needed, but setVideos logic checks image reference
-            idleVideoRef.current.addEventListener('canplay', updateVideos);
-            mainVideoRef.current.addEventListener('canplay', updateVideos);
-            return () => {
-                idleVideoRef.current?.removeEventListener('canplay', updateVideos);
-                mainVideoRef.current?.removeEventListener('canplay', updateVideos);
+        const updateVideos = () => {
+            if (rendererRef.current && idleVideoRef.current && mainVideoRef.current) {
+                rendererRef.current.setVideos(idleVideoRef.current, mainVideoRef.current);
             }
+        };
+
+        // Initial call
+        updateVideos();
+
+        const idle = idleVideoRef.current;
+        const main = mainVideoRef.current;
+        if (idle) idle.addEventListener('canplay', updateVideos);
+        if (main) main.addEventListener('canplay', updateVideos);
+
+        return () => {
+            if (idle) idle.removeEventListener('canplay', updateVideos);
+            if (main) main.removeEventListener('canplay', updateVideos);
         }
-    }, []);
+    }, [rendererRef.current]); // Re-run if renderer is recreated
 
     return (
         <div
@@ -284,8 +287,20 @@ const OutputWindow = ({ index }: { index: number }) => {
             />
 
             {/* Hidden Video Elements for Output */}
-            <video ref={idleVideoRef} crossOrigin="anonymous" loop muted playsInline style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }} />
-            <video ref={mainVideoRef} crossOrigin="anonymous" muted playsInline style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }} />
+            <video
+                ref={idleVideoRef}
+                crossOrigin="anonymous" loop muted playsInline
+                onError={(e) => console.error('Output Idle Error:', e.currentTarget.error)}
+                onLoadedMetadata={() => console.log('Output Idle Loaded')}
+                style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }}
+            />
+            <video
+                ref={mainVideoRef}
+                crossOrigin="anonymous" muted playsInline
+                onError={(e) => console.error('Output Main Error:', e.currentTarget.error)}
+                onLoadedMetadata={() => console.log('Output Main Loaded')}
+                style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }}
+            />
 
             <div className="absolute top-4 left-4 text-white/50 text-xs font-mono opacity-50 select-none z-50 pointer-events-none mix-blend-difference">
                 OUTPUT {index + 1} {aspectLock && '[16:9 LOCKED]'}
@@ -360,6 +375,28 @@ export default function App() {
     const selectionRef = useRef<{ r: number, c: number }[]>([]);
     useEffect(() => { selectionRef.current = selectedPoints }, [selectedPoints]);
 
+    // 1. Initialize Renderer
+    useEffect(() => {
+        if (containerRefs[0].current && containerRefs[1].current && containerRefs[2].current && !rendererRef.current) {
+            console.log('[App] Initializing Renderer');
+            rendererRef.current = new ThreeRenderer([
+                { index: 0, container: containerRefs[0].current! },
+                { index: 1, container: containerRefs[1].current! },
+                { index: 2, container: containerRefs[2].current! }
+            ]);
+
+            // Initial Push
+            projectors.forEach((proj, i) => {
+                rendererRef.current?.updateInputCrop(i, proj.crop);
+                rendererRef.current?.updateGridWarp(i, proj.grid, proj.rows, proj.cols, proj.mode);
+            });
+        }
+        return () => {
+            rendererRef.current?.dispose();
+            rendererRef.current = null;
+        };
+    }, []);
+
     // Crossfade Logic
     const fadeTo = (target: 'IDLE' | 'MAIN') => {
         const start = performance.now();
@@ -420,6 +457,10 @@ export default function App() {
         return () => window.removeEventListener('keydown', onKey);
     }, [playbackState]);
 
+    // Use a Ref for mixValue to avoid re-creating the interval constantly
+    const mixValueRef = useRef(mixValue);
+    useEffect(() => { mixValueRef.current = mixValue; }, [mixValue]);
+
     // Sync Master (Dual Video)
     const broadcastSync = () => {
         const channel = new BroadcastChannel('lumina_sync');
@@ -431,23 +472,34 @@ export default function App() {
             mainTime: mainVideoRef.current?.currentTime || 0,
             idlePaused: idleVideoRef.current?.paused || false,
             mainPaused: mainVideoRef.current?.paused || false,
-            mix: mixValue
+            mix: mixValueRef.current // Use Ref here
         });
         channel.close();
     };
 
     useEffect(() => {
         const channel = new BroadcastChannel('lumina_sync');
-        channel.onmessage = (e) => { if (e.data.type === 'HELLO') broadcastSync(); };
-        const interval = setInterval(broadcastSync, 500); // Sync more frequently for mix
+        channel.onmessage = (e) => {
+            if (e.data.type === 'HELLO') {
+                console.log("New Output Window detected. Sending Sync...");
+                broadcastSync();
+            }
+        };
+        const interval = setInterval(broadcastSync, 33);
         return () => { clearInterval(interval); channel.close(); };
-    }, [mixValue]);
+    }, []); // Empty dependency array = Stable Interval!
 
     // 3. Video Handling - Update Renderer with current Refs
     useEffect(() => {
         if (!rendererRef.current) return;
+        console.log("Setting Videos refs", idleVideoRef.current, mainVideoRef.current);
         rendererRef.current.setVideos(idleVideoRef.current, mainVideoRef.current);
-    }, [idleVideoUrl, mainVideoUrl]);
+
+        // Force play idle to ensure texture update
+        if (idleVideoRef.current && idleVideoRef.current.paused) {
+            idleVideoRef.current.play().catch(e => console.warn("Auto-play blocked", e));
+        }
+    }, [idleVideoUrl, mainVideoUrl, rendererRef.current]);
 
     // Auto-Return to Idle when Main ends
     useEffect(() => {
@@ -597,7 +649,10 @@ export default function App() {
                 loop
                 muted
                 playsInline
-                onPlay={broadcastSync} onPause={broadcastSync}
+                onPlay={() => { console.log('Ctl Idle : Playing'); broadcastSync(); }}
+                onPause={() => { console.log('Ctl Idle : Paused'); broadcastSync(); }}
+                onError={(e) => console.error('Ctl Idle Error:', e.currentTarget.error)}
+                onLoadedMetadata={(e) => console.log('Ctl Idle Loaded:', e.currentTarget.videoWidth, 'x', e.currentTarget.videoHeight)}
                 style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }}
             />
             <video
@@ -605,7 +660,10 @@ export default function App() {
                 src={mainVideoUrl}
                 muted
                 playsInline
-                onPlay={broadcastSync} onPause={broadcastSync}
+                onPlay={() => { console.log('Ctl Main : Playing'); broadcastSync(); }}
+                onPause={() => { console.log('Ctl Main : Paused'); broadcastSync(); }}
+                onError={(e) => console.error('Ctl Main Error:', e.currentTarget.error)}
+                onLoadedMetadata={(e) => console.log('Ctl Main Loaded:', e.currentTarget.videoWidth, 'x', e.currentTarget.videoHeight)}
                 style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }}
             />
 
