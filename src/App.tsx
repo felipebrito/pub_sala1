@@ -392,13 +392,15 @@ export default function App() {
 
     // 2. Sync Projectors Projectors -> Renderer    // Auto-Save
     useEffect(() => {
-        localStorage.setItem('lumina-config-v4', JSON.stringify(projectors));
+        localStorage.setItem('lumina-config-v5', JSON.stringify(projectors));
 
         if (!rendererRef.current) return;
 
         projectors.forEach((proj, i) => {
             rendererRef.current?.updateInputCrop(i, proj.crop);
             rendererRef.current?.updateGridWarp(i, proj.grid, proj.rows, proj.cols, proj.mode);
+            if (proj.edgeBlend) rendererRef.current?.updateEdgeBlend(i, proj.edgeBlend);
+            if (proj.masks) rendererRef.current?.updateMasks(i, proj.masks.map(m => m.points));
         });
     }, [projectors]);
 
@@ -822,8 +824,35 @@ export default function App() {
                     </h2>
 
                     {/* IDLE SLOT */}
-                    <div>
+                    <div className="space-y-2">
                         <div className="text-[10px] text-slate-400 uppercase mb-1">Idle Loop (Background)</div>
+
+                        {/* Test Videos Dropdown */}
+                        <select
+                            value=""
+                            onChange={(e) => {
+                                if (e.target.value) {
+                                    setIdleVideoUrl(e.target.value);
+                                    setVideoUrl(e.target.value);
+                                    setPlaybackState('IDLE');
+                                    setTimeout(() => {
+                                        if (videoRef.current) {
+                                            videoRef.current.loop = true;
+                                            videoRef.current.play().catch(() => { });
+                                            setIsPlaying(true);
+                                        }
+                                    }, 100);
+                                }
+                            }}
+                            className="w-full bg-slate-800 text-white px-2 py-1 rounded text-xs border border-slate-700 hover:border-slate-600"
+                        >
+                            <option value="">Select Test Video...</option>
+                            {TEST_VIDEOS.map((video, i) => (
+                                <option key={i} value={video.url}>{video.title}</option>
+                            ))}
+                        </select>
+
+                        {/* File Upload */}
                         <div className="flex gap-2">
                             <input
                                 type="file"
@@ -831,19 +860,47 @@ export default function App() {
                                 className="hidden"
                                 id="idle-upload"
                                 onChange={(e) => {
-                                    if (e.target.files?.[0]) setIdleVideoUrl(URL.createObjectURL(e.target.files[0]));
+                                    if (e.target.files?.[0]) {
+                                        const url = URL.createObjectURL(e.target.files[0]);
+                                        setIdleVideoUrl(url);
+                                        setVideoUrl(url);
+                                        setPlaybackState('IDLE');
+                                        setTimeout(() => {
+                                            if (videoRef.current) {
+                                                videoRef.current.loop = true;
+                                                videoRef.current.play().catch(() => { });
+                                                setIsPlaying(true);
+                                            }
+                                        }, 100);
+                                    }
                                 }}
                             />
                             <label htmlFor="idle-upload" className="bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded text-xs cursor-pointer truncate flex-1 text-center">
-                                {idleVideoUrl ? 'Change Idle File' : 'Select Idle Video...'}
+                                {idleVideoUrl ? 'Upload Different File' : 'Upload Local File...'}
                             </label>
                             {idleVideoUrl && <button onClick={() => setIdleVideoUrl('')} className="text-red-500 hover:text-red-400">×</button>}
                         </div>
                     </div>
 
                     {/* MAIN SLOT */}
-                    <div>
+                    <div className="space-y-2">
                         <div className="text-[10px] text-slate-400 uppercase mb-1">Main Content (One-Shot)</div>
+
+                        {/* Test Videos Dropdown */}
+                        <select
+                            value=""
+                            onChange={(e) => {
+                                if (e.target.value) setMainVideoUrl(e.target.value);
+                            }}
+                            className="w-full bg-slate-800 text-white px-2 py-1 rounded text-xs border border-slate-700 hover:border-slate-600"
+                        >
+                            <option value="">Select Test Video...</option>
+                            {TEST_VIDEOS.map((video, i) => (
+                                <option key={i} value={video.url}>{video.title}</option>
+                            ))}
+                        </select>
+
+                        {/* File Upload */}
                         <div className="flex gap-2">
                             <input
                                 type="file"
@@ -855,7 +912,7 @@ export default function App() {
                                 }}
                             />
                             <label htmlFor="main-upload" className="bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded text-xs cursor-pointer truncate flex-1 text-center">
-                                {mainVideoUrl ? 'Change Main File' : 'Select Main Video...'}
+                                {mainVideoUrl ? 'Upload Different File' : 'Upload Local File...'}
                             </label>
                             {mainVideoUrl && <button onClick={() => setMainVideoUrl('')} className="text-red-500 hover:text-red-400">×</button>}
                         </div>
