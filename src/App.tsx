@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ThreeRenderer } from './core/ThreeRenderer'
+import { useLedBridge } from './hooks/useLedBridge'
 import { TEST_VIDEOS } from './constants/videos';
 import { Play, Pause, Grid3X3, MousePointer2, ExternalLink, RotateCcw, Plus, Minus } from 'lucide-react'
 import { io } from 'socket.io-client';
@@ -401,6 +402,10 @@ export default function App() {
     const [mainVideoUrl, setMainVideoUrl] = useState<string>('/videos/main_content.mp4');
     const [playbackState, setPlaybackState] = useState<'IDLE' | 'MAIN' | 'TRANSITION'>('IDLE');
     const [mixValue, setMixValue] = useState(0); // 0 = Idle, 1 = Main
+    const [isLedBroadcastEnabled, setIsLedBroadcastEnabled] = useState(false);
+
+    // LED Bridge
+    const { isConnected: isLedBridgeConnected, sendData: sendLedData } = useLedBridge();
 
     // Refs
     const rendererRef = useRef<ThreeRenderer | null>(null);
@@ -620,6 +625,34 @@ export default function App() {
         mainInfo.addEventListener('ended', onEnd);
         return () => mainInfo.removeEventListener('ended', onEnd);
     }, []);
+
+    // 6. LED Sampling Loop
+    useEffect(() => {
+        if (!isLedBroadcastEnabled || !isLedBridgeConnected) return;
+
+        let lastTime = 0;
+        const fps = 30;
+        const interval = 1000 / fps;
+
+        let rafId: number;
+        const sampleAndSend = (time: number) => {
+            if (time - lastTime >= interval) {
+                if (rendererRef.current) {
+                    // Sample from the first projector (main content area)
+                    // 180 pixels for the WS2811 strip
+                    const pixelData = rendererRef.current.samplePixels(0, 180);
+                    if (pixelData) {
+                        sendLedData(pixelData);
+                    }
+                }
+                lastTime = time;
+            }
+            rafId = requestAnimationFrame(sampleAndSend);
+        };
+
+        rafId = requestAnimationFrame(sampleAndSend);
+        return () => cancelAnimationFrame(rafId);
+    }, [isLedBroadcastEnabled, isLedBridgeConnected, sendLedData]);
 
     // --- Logic ---
 
@@ -1171,15 +1204,11 @@ export default function App() {
                     </div>
                 </div>
 
-                {/* PLAY BUTTONS */}
                 <div className="flex gap-2 pt-2 border-t border-white/5">
                     <button
                         onClick={() => {
                             if (!mainVideoUrl) return alert('No Main Video selected');
-                            // setMainVideoUrl(mainVideoUrl); // Redundant
-                            // playVideo(mainVideoUrl, 'MAIN'); // Removed
                             fadeTo('MAIN');
-                            // if (videoRef.current) videoRef.current.currentTime = 0; // Removed
                         }}
                         disabled={!mainVideoUrl}
                         className={`flex-1 py-3 font-bold rounded flex flex-col items-center justify-center ${playbackState === 'MAIN' ? 'bg-red-600 text-white shadow-[0_0_15px_rgba(220,38,38,0.5)]' : 'bg-slate-700 hover:bg-white/10'}`}
@@ -1190,7 +1219,6 @@ export default function App() {
                     <button
                         onClick={() => {
                             if (!idleVideoUrl) return alert('No Idle Video selected');
-                            // playVideo(idleVideoUrl, 'IDLE'); // Removed
                             fadeTo('IDLE');
                         }}
                         disabled={!idleVideoUrl}
@@ -1200,6 +1228,37 @@ export default function App() {
                     </button>
                 </div>
 
+                <div className="mt-8 pt-4 border-t border-white/10">
+                    <div className="flex items-center justify-between mb-4">
+                        <div className="flex flex-col">
+                            <span className="text-[10px] uppercase font-bold text-white/40 mb-1">LED Bridge</span>
+                            <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${isLedBridgeConnected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`} />
+                                <span className={`text-[10px] font-mono ${isLedBridgeConnected ? 'text-green-400' : 'text-red-400'}`}>
+                                    {isLedBridgeConnected ? 'CONNECTED' : 'DISCONNECTED'}
+                                </span>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => setIsLedBroadcastEnabled(!isLedBroadcastEnabled)}
+                            className={`px-4 py-2 rounded-md text-[10px] font-bold transition-all ${isLedBroadcastEnabled
+                                ? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]'
+                                : 'bg-white/5 text-white/40 hover:bg-white/10'
+                                }`}
+                        >
+                            {isLedBroadcastEnabled ? 'BROADCASTING' : 'OFF AIR'}
+                        </button>
+                    </div>
+                </div>
+
+                <div className="pt-2 border-t border-white/5 space-y-2">
+                    <button
+                        onClick={() => window.open('/?output=0', '_blank', 'width=1280,height=720')}
+                        className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white/70 text-xs rounded border border-white/5 flex items-center justify-center gap-2"
+                    >
+                        <ExternalLink size={12} /> Open Projector 1 Output
+                    </button>
+                </div>
             </aside>
 
             {/* Main Viewport */}

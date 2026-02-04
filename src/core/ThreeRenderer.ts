@@ -288,6 +288,40 @@ export class ThreeRenderer {
         }
     }
 
+    /**
+     * Samples a horizontal line of pixels from the specified renderer.
+     * Returns an RGB Uint8Array of size [count * 3].
+     */
+    public samplePixels(index: number, count: number): Uint8Array | null {
+        const renderer = this.renderers[index];
+        if (!renderer) return null;
+
+        const gl = renderer.getContext();
+        const width = gl.drawingBufferWidth;
+        const height = gl.drawingBufferHeight;
+
+        // Sample middle row
+        const y = Math.floor(height / 2);
+
+        // We only read the exact pixels we need to resample later, 
+        // or a full row if it's easier. A full row is safer for aliasing.
+        const rowData = new Uint8Array(width * 4);
+        gl.readPixels(0, y, width, 1, gl.RGBA, gl.UNSIGNED_BYTE, rowData);
+
+        const result = new Uint8Array(count * 3);
+        const step = width / count;
+
+        for (let i = 0; i < count; i++) {
+            const sampleX = Math.floor(i * step);
+            const sourceIdx = sampleX * 4;
+            result[i * 3] = rowData[sourceIdx];     // R
+            result[i * 3 + 1] = rowData[sourceIdx + 1]; // G
+            result[i * 3 + 2] = rowData[sourceIdx + 2]; // B
+        }
+
+        return result;
+    }
+
     public dispose() {
         this.isDisposed = true;
         if (this.animationId) cancelAnimationFrame(this.animationId);

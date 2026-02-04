@@ -7,6 +7,9 @@ export const CONFIG = {
     TARGET_IP: '255.255.255.255', // Broadcast for easier discovery
     PORT: 6454,
 
+    // WebSocket configuration
+    WS_PORT: 8080,
+
     // Universe mapping
     // Universe 0: pixels 1-170 (510 channels)
     // Universe 1: pixels 171-180 (30 channels)

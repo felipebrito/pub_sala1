@@ -19,13 +19,16 @@ Simulates a professional projection mapping workflow directly in the browser.
   - Background "Ghost Video" reference (Optional) or clean output mode.
   - Optimized VideoTexture handling via Three.js.
   - Auto-play and loop management.
+- **LED Bridge (Art-Net)**:
+  - Real-time 1D Pixel Sampling from the WebGL canvas.
+  - Art-Net (DMX) output over UDP (Broadcast).
+  - Standalone Node.js bridge for hardware integration (ESP32/WLED/Resolume).
 
 ## Technology Stack
 
-- **Core**: React 18 + TypeScript + Vite
-- **3D Engine**: Three.js (WebGL)
-- **Styling**: Tailwind CSS
-- **Icons**: Lucide React
+- **Frontend**: React 18 + TypeScript + Vite + Three.js
+- **Bridge**: Node.js + `dgram` (UDP) + `ws` (WebSockets)
+- **Protocols**: Art-Net (ArtDMX), WebSocket (Binary)
 
 ## Architecture
 
@@ -35,49 +38,45 @@ The core rendering engine. Replaces standard DOM manipulation with a WebGL conte
 - Implements `VideoTexture` streaming.
 - **Warping Logic**: Directly manipulates the vertex positions of a high-density 32x32 `PlaneGeometry`. Uses `WarpMath.ts` to calculate smooth curves between control points.
 - **Input Mapping**: Manipulates UV coordinates of the mesh to "slice" the video texture.
+- **Pixel Sampling**: Captures RGB data from the canvas at 30 FPS for LED synchronization.
 
-### `WarpMath.ts`
-Mathematical helper library.
-- Provides **Bilinear** and **Bicubic (Catmull-Rom)** interpolation algorithms to map sparse control points (e.g., 2x2 corners) to a dense mesh surface.
+### LED Bridge (`/bridge`)
+A standalone Node.js service that acts as a middleware between the browser and the LED hardware.
+- **WebSocket Server**: Receives binary pixel data from the browser.
+- **Art-Net Sender**: Packs data into ArtDMX packets and broadcasts them to the network (Port 6454).
+- **Fallback Generator**: Sends test patterns (corners, gradient, chase) when the browser is disconnected.
 
 ## Getting Started
 
 1. **Install Dependencies**
    ```bash
-   npm install
+   npm install && cd bridge && npm install
    ```
 
-2. **Run Development Server**
+2. **Run the Bridge (For LEDs)**
+   ```bash
+   cd bridge
+   node index.js
+   ```
+
+3. **Run Development Server**
    ```bash
    npm run dev
    ```
 
-3. **Open in Browser**
-   Interact with the UI at `http://localhost:5173`.
-
-## Controls
-
-- **Projectors**: Select P1, P2, or P3.
-- **Warp Modes**: 
-  - **Quad**: Standard 4-corner perspective correction (Linear).
-  - **Bezier**: Advanced warping with control handles for curved surfaces (Bicubic).
-- **Interaction**:
-  - **Drag**: Move control points.
-  - **Shift/Ctrl + Click**: Select multiple points to move them together.
-- **Input Mapping**: Crop specific regions of the source video.
+4. **Open in Browser**
+   Interact with the UI at `http://localhost:5173`. Toggle **BROADCASTING** in the sidebar to send data to the LEDs.
 
 ## Roadmap & Changelog
 
 ### ✅ Completed
 - [x] **Core Engine rewrite**: Transitioned to unified `ProjectorConfig` state.
-- [x] **High-Performance Mesh**: 32x32 vertex grid for smooth distortions.
-- [x] **Advanced Warping Modes**:
-  - **Linear (Quad)**: 2x2 Grid with straight edges.
-  - **Bicubic (Bezier)**: 4x4 Grid approximation with intelligent control handles.
-- [x] **Coons Patch Math**: Auto-calculation of internal surface points for perfect curves.
-- [x] **Enhanced UI/UX**:
-  - Multi-selection of points (Shift/Ctrl + Click).
-  - Visual feedback for handles vs corners.
+- [x] **Advanced Warping Modes**: Linear (Quad) and Bicubic (Bezier) 4x4.
+- [x] **LED Bridge Protocol**:
+    - [x] Node.js Middleware (WS to Art-Net).
+    - [x] Browser sampling logic (30 FPS).
+    - [x] Multi-universe support (180+ pixels).
+- [x] **Dual Video Engine**: Smooth crossfading between "Idle" and "Main" loops.
 
 ### 🚧 Upcoming / Planned
 - [ ] **Edge Blending**: Soft gradient masking for overlapping projectors.
