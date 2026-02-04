@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ThreeRenderer } from './core/ThreeRenderer'
 import { TEST_VIDEOS } from './constants/videos';
-import { Play, Pause, Grid3X3, MousePointer2, ExternalLink } from 'lucide-react'
+import { Play, Pause, Grid3X3, MousePointer2, ExternalLink, RotateCcw } from 'lucide-react'
 
 // Types
 interface Point { x: number; y: number }
@@ -80,6 +80,7 @@ const calculateInternalPoints = (grid: Point[][]): Point[][] => {
     return newGrid;
 };
 
+// Default Config
 // Default Config
 const DEFAULT_CONFIGS = (): ProjectorConfig[] => [0, 1, 2].map(i => ({
     rows: 2,
@@ -193,16 +194,19 @@ const OutputWindow = ({ index }: { index: number }) => {
     // Handle Resize keep warp correct
     useEffect(() => {
         const handleResize = () => {
-            if (rendererRef.current && config) {
-                // Wait for layout update
-                requestAnimationFrame(() => {
-                    rendererRef.current?.updateGridWarp(index, config.grid, config.rows, config.cols, config.mode);
-                });
+            if (rendererRef.current && canvasWrapperRef.current) {
+                // Resize Renderer to match Wrapper (which is 100% of window)
+                const w = window.innerWidth;
+                const h = window.innerHeight;
+                rendererRef.current.resize(index, w, h);
             }
         };
+        // Trigger once on mount/new renderer
+        handleResize();
+
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
-    }, [config, index, aspectLock]); // Dep on aspectLock to re-warp on toggle
+    }, [index]);
 
     // Sync Slave
     useEffect(() => {
@@ -243,18 +247,21 @@ const OutputWindow = ({ index }: { index: number }) => {
         >
             <div
                 ref={canvasWrapperRef}
-                style={aspectLock ? {
-                    width: '100%',
-                    height: '100%',
-                    maxWidth: '177.78vh', // 16:9 aspect ratio (16/9 * 100vh)
-                    maxHeight: '56.25vw', // 16:9 aspect ratio (9/16 * 100vw)
-                    aspectRatio: '16/9',
-                    position: 'relative'
-                } : {
-                    width: '100%',
-                    height: '100%',
-                    position: 'absolute',
-                    inset: 0
+                style={{
+                    ...(aspectLock ? {
+                        width: '100%',
+                        height: '100%',
+                        maxWidth: '177.78vh', // 16:9 aspect ratio (16/9 * 100vh)
+                        maxHeight: '56.25vw', // 16:9 aspect ratio (9/16 * 100vw)
+                        aspectRatio: '16/9',
+                        position: 'relative'
+                    } : {
+                        width: '100%',
+                        height: '100%',
+                        position: 'absolute',
+                        inset: 0
+                    }),
+                    transform: config ? `scale(${config.flipH ? -1 : 1}, ${config.flipV ? -1 : 1})` : 'none'
                 }}
             />
 
@@ -265,6 +272,11 @@ const OutputWindow = ({ index }: { index: number }) => {
                 muted
                 playsInline
                 autoPlay
+                onTimeUpdate={(e) => {
+                    // Sync time display if needed? No, output window purely renders.
+                    // But if we want to debug seek:
+                    // console.log(e.currentTarget.currentTime);
+                }}
                 onCanPlay={() => {
                     if (videoRef.current && rendererRef.current) {
                         videoRef.current.play().catch(e => console.warn(e));
@@ -316,6 +328,10 @@ export default function App() {
     const [projectors, setProjectors] = useState<ProjectorConfig[]>(loadConfig);
     const [selectedProjector, setSelectedProjector] = useState(0);
     const [selectedPoints, setSelectedPoints] = useState<{ r: number, c: number }[]>([]);
+
+    // Masking State
+    const [activeTool, setActiveTool] = useState<'move' | 'mask'>('move');
+    const [drawingMask, setDrawingMask] = useState<Point[]>([]);
 
     // Video State
     const [isPlaying, setIsPlaying] = useState(false);
@@ -381,7 +397,7 @@ export default function App() {
         };
     }, []);
 
-    // 2. Sync Projectors Projectors -> Renderer & Storage
+    // 2. Sync Projectors Projectors -> Renderer    // Auto-Save
     useEffect(() => {
         localStorage.setItem('lumina-config-v4', JSON.stringify(projectors));
 
@@ -390,6 +406,8 @@ export default function App() {
         projectors.forEach((proj, i) => {
             rendererRef.current?.updateInputCrop(i, proj.crop);
             rendererRef.current?.updateGridWarp(i, proj.grid, proj.rows, proj.cols, proj.mode);
+            if (proj.edgeBlend) rendererRef.current?.updateEdgeBlend(i, proj.edgeBlend);
+            if (proj.masks) rendererRef.current?.updateMasks(i, proj.masks.map(m => m.points));
         });
     }, [projectors]);
 
@@ -428,6 +446,18 @@ export default function App() {
         if (!url) return;
         setPlaybackState(state);
         setVideoUrl(url); // This triggers the useEffect above
+    };
+
+    // Helper to play a video
+    const playVideo = (url: string, state: 'IDLE' | 'MAIN') => {
+        setVideoUrl(url);
+        setPlaybackState(state);
+        // Set loop based on state
+        setTimeout(() => {
+            if (videoRef.current) {
+                videoRef.current.loop = (state === 'IDLE');
+            }
+        }, 0);
     };
 
     // --- Logic ---
@@ -569,7 +599,33 @@ export default function App() {
 
     return (
         <div className="flex h-screen bg-[#0a0e1a] text-slate-300">
-            <video ref={videoRef} onPlay={broadcastSync} onPause={broadcastSync} onSeeked={broadcastSync} style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }} playsInline autoPlay muted loop />
+            <video
+                ref={videoRef}
+                onPlay={broadcastSync}
+                onPause={broadcastSync}
+                onSeeked={broadcastSync}
+                onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+                onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+                onEnded={() => {
+                    if (playbackState === 'MAIN') {
+                        // Main finished -> Back to Idle
+                        if (idleVideoUrl) {
+                            setVideoUrl(idleVideoUrl);
+                            setPlaybackState('IDLE');
+                            setTimeout(() => {
+                                if (videoRef.current) {
+                                    videoRef.current.loop = true;
+                                    videoRef.current.play();
+                                }
+                            }, 50);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }
+                }}
+                style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }}
+                playsInline autoPlay muted loop
+            />
 
             <aside className="w-64 bg-[#0f1419] border-r border-white/10 p-6 flex flex-col gap-6 overflow-y-auto z-10 shrink-0">
                 <div>
@@ -651,6 +707,35 @@ export default function App() {
                                 />
                             </div>
                         ))}
+
+                        <div className="flex gap-4 pt-2">
+                            <label className="flex items-center gap-2 text-[10px] text-slate-400 uppercase cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={projectors[selectedProjector].flipH || false}
+                                    onChange={(e) => {
+                                        const newConfigs = [...projectors];
+                                        newConfigs[selectedProjector].flipH = e.target.checked;
+                                        setProjectors(newConfigs);
+                                    }}
+                                    className="accent-amber-500"
+                                />
+                                Flip H
+                            </label>
+                            <label className="flex items-center gap-2 text-[10px] text-slate-400 uppercase cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={projectors[selectedProjector].flipV || false}
+                                    onChange={(e) => {
+                                        const newConfigs = [...projectors];
+                                        newConfigs[selectedProjector].flipV = e.target.checked;
+                                        setProjectors(newConfigs);
+                                    }}
+                                    className="accent-amber-500"
+                                />
+                                Flip V
+                            </label>
+                        </div>
                     </div>
                 </div>
 
@@ -947,7 +1032,7 @@ export default function App() {
                         </div>
                     ))}
                 </div>
-            </main>
-        </div>
+            </main >
+        </div >
     );
 }
