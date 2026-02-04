@@ -405,6 +405,7 @@ export default function App() {
     const [isLedBroadcastEnabled, setIsLedBroadcastEnabled] = useState(false);
     const [ledSampleMethod, setLedSampleMethod] = useState<'OUTPUT' | 'VIDEO'>('OUTPUT');
     const [ledDataRowY, setLedDataRowY] = useState(0.99); // Default to near bottom
+    const [ledPreviewData, setLedPreviewData] = useState<Uint8Array | null>(null);
 
     // LED Bridge
     const { isConnected: isLedBridgeConnected, sendData: sendLedData } = useLedBridge();
@@ -653,6 +654,7 @@ export default function App() {
 
                     if (pixelData) {
                         sendLedData(pixelData);
+                        setLedPreviewData(pixelData);
                     }
                 }
                 lastTime = time;
@@ -1400,7 +1402,40 @@ export default function App() {
                         </div>
                     ))}
                 </div>
+
+                {/* LED Preview Bar (Data Feedback) */}
+                <div className="mt-12 flex flex-col items-center gap-3">
+                    <div className="flex items-center gap-2 text-[10px] font-bold text-white/20 uppercase tracking-[0.2em]">
+                        <div className={`w-1.5 h-1.5 rounded-full ${isLedBroadcastEnabled && isLedBridgeConnected ? 'bg-blue-500 animate-pulse' : 'bg-slate-700'}`} />
+                        LED Streaming Feedback (180 Pixels)
+                    </div>
+                    <div
+                        className="h-4 rounded bg-black/40 ring-1 ring-white/5 overflow-hidden flex shadow-2xl"
+                        style={{ width: '1108px' }} // Matches the width of 3 projectors (360*3) + gaps (16*2)
+                    >
+                        {ledPreviewData ? (
+                            Array.from({ length: 180 }).map((_, i) => (
+                                <div
+                                    key={i}
+                                    className="flex-1 h-full"
+                                    style={{
+                                        backgroundColor: `rgb(${ledPreviewData[i * 3]}, ${ledPreviewData[i * 3 + 1]}, ${ledPreviewData[i * 3 + 2]})`,
+                                        boxShadow: isLedBroadcastEnabled ? `0 0 10px rgba(${ledPreviewData[i * 3]}, ${ledPreviewData[i * 3 + 1]}, ${ledPreviewData[i * 3 + 2]}, 0.3)` : 'none'
+                                    }}
+                                />
+                            ))
+                        ) : (
+                            <div className="w-full h-full flex items-center justify-center text-[9px] text-slate-700 italic">
+                                Waiting for broadcast signal...
+                            </div>
+                        )}
+                    </div>
+                    <div className="text-[9px] text-slate-600 font-mono">
+                        {ledSampleMethod === 'VIDEO' ? `Sampling Video Data Row at ${Math.round(ledDataRowY * 100)}%` : 'Sampling Main Output (Projector 1)'}
+                    </div>
+                </div>
             </main >
+
         </div >
     );
 }
