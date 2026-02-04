@@ -913,6 +913,63 @@ export default function App() {
                     ))}
                 </div>
 
+                {/* LED Bridge Section - Moved for visibility */}
+                <div className="pt-4 border-t border-white/10">
+                    <div className="flex items-center justify-between mb-2">
+                        <div className="flex flex-col">
+                            <span className="text-[10px] uppercase font-bold text-white/40 mb-1">LED Bridge</span>
+                            <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${isLedBridgeConnected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`} />
+                                <span className={`text-[10px] font-mono ${isLedBridgeConnected ? 'text-green-400' : 'text-red-400'}`}>
+                                    {isLedBridgeConnected ? 'CONNECTED' : 'DISCONNECTED'}
+                                </span>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => setIsLedBroadcastEnabled(!isLedBroadcastEnabled)}
+                            className={`px-3 py-1.5 rounded-md text-[9px] font-bold transition-all ${isLedBroadcastEnabled
+                                ? 'bg-blue-600 text-white shadow-[0_0_10px_rgba(37,99,235,0.4)]'
+                                : 'bg-white/5 text-white/40 hover:bg-white/10'
+                                }`}
+                        >
+                            {isLedBroadcastEnabled ? 'BROADCASTING' : 'OFF AIR'}
+                        </button>
+                    </div>
+
+                    <div className="space-y-3 py-3 bg-white/5 rounded-lg p-3 mt-2 border border-white/5">
+                        <div className="flex flex-col gap-2">
+                            <span className="text-[9px] uppercase font-bold text-white/20">Source</span>
+                            <div className="flex bg-slate-900/50 rounded p-1">
+                                {(['OUTPUT', 'VIDEO'] as const).map(m => (
+                                    <button
+                                        key={m}
+                                        onClick={() => setLedSampleMethod(m)}
+                                        className={`flex-1 py-1 text-[9px] rounded transition-all ${ledSampleMethod === m ? 'bg-amber-500 text-black font-bold' : 'text-slate-500 hover:text-white'}`}
+                                    >
+                                        {m === 'OUTPUT' ? 'Output' : 'Data Row'}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {ledSampleMethod === 'VIDEO' && (
+                            <div className="space-y-2 pt-1 border-t border-white/5">
+                                <div className="flex justify-between text-[9px] uppercase">
+                                    <span className="text-slate-500">Row Pos</span>
+                                    <span className="text-amber-500 font-mono">{Math.round(ledDataRowY * 100)}%</span>
+                                </div>
+                                <input
+                                    type="range" min="0" max="1" step="0.001"
+                                    value={ledDataRowY}
+                                    onChange={(e) => setLedDataRowY(parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                                />
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+
                 {/* Mode Control */}
                 <div>
                     <h2 className="text-xs font-bold text-slate-500 uppercase mb-2">Warp Mode</h2>
@@ -1240,64 +1297,6 @@ export default function App() {
                     </button>
                 </div>
 
-                <div className="mt-8 pt-4 border-t border-white/10">
-                    <div className="flex items-center justify-between mb-4">
-                        <div className="flex flex-col">
-                            <span className="text-[10px] uppercase font-bold text-white/40 mb-1">LED Bridge</span>
-                            <div className="flex items-center gap-2">
-                                <div className={`w-2 h-2 rounded-full ${isLedBridgeConnected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`} />
-                                <span className={`text-[10px] font-mono ${isLedBridgeConnected ? 'text-green-400' : 'text-red-400'}`}>
-                                    {isLedBridgeConnected ? 'CONNECTED' : 'DISCONNECTED'}
-                                </span>
-                            </div>
-                        </div>
-                        <button
-                            onClick={() => setIsLedBroadcastEnabled(!isLedBroadcastEnabled)}
-                            className={`px-4 py-2 rounded-md text-[10px] font-bold transition-all ${isLedBroadcastEnabled
-                                ? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]'
-                                : 'bg-white/5 text-white/40 hover:bg-white/10'
-                                }`}
-                        >
-                            {isLedBroadcastEnabled ? 'BROADCASTING' : 'OFF AIR'}
-                        </button>
-                    </div>
-
-                    <div className="space-y-4 pt-4 border-t border-white/5">
-                        <div className="flex flex-col gap-2">
-                            <span className="text-[10px] uppercase font-bold text-white/40">Sampling Source</span>
-                            <div className="flex bg-slate-800 rounded p-1">
-                                {(['OUTPUT', 'VIDEO'] as const).map(m => (
-                                    <button
-                                        key={m}
-                                        onClick={() => setLedSampleMethod(m)}
-                                        className={`flex-1 py-1.5 text-[10px] rounded transition-all ${ledSampleMethod === m ? 'bg-amber-500 text-black font-bold' : 'text-slate-400 hover:text-white'}`}
-                                    >
-                                        {m === 'OUTPUT' ? 'Output Canvas' : 'Video Data Row'}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        {ledSampleMethod === 'VIDEO' && (
-                            <div className="space-y-2">
-                                <div className="flex justify-between text-[10px] uppercase">
-                                    <span className="text-slate-500">Data Row Y Pos</span>
-                                    <span className="text-amber-500 font-mono">{Math.round(ledDataRowY * 100)}%</span>
-                                </div>
-                                <input
-                                    type="range" min="0" max="1" step="0.001"
-                                    value={ledDataRowY}
-                                    onChange={(e) => setLedDataRowY(parseFloat(e.target.value))}
-                                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                                />
-                                <div className="text-[9px] text-slate-600 italic">
-                                    * Samples high-res source regardless of mapping.
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </div>
-
                 <div className="pt-2 border-t border-white/5 space-y-2">
                     <button
                         onClick={() => window.open('/?output=0', '_blank', 'width=1280,height=720')}
@@ -1309,8 +1308,8 @@ export default function App() {
             </aside>
 
             {/* Main Viewport */}
-            <main className="flex-1 flex items-center justify-center p-8 bg-gradient-to-b from-transparent to-black/20 overflow-hidden select-none">
-                <div className="flex flex-row gap-4 transform scale-90 origin-center">
+            <main className="flex-1 flex flex-col items-center justify-center p-8 bg-gradient-to-b from-transparent to-black/20 overflow-hidden select-none">
+                <div className="flex flex-row flex-nowrap gap-4 transform scale-90 origin-center">
                     {projectors.map((config, i) => (
                         <div key={i} className="relative group">
                             {/* Header */}
@@ -1419,8 +1418,8 @@ export default function App() {
                                     key={i}
                                     className="flex-1 h-full"
                                     style={{
-                                        backgroundColor: `rgb(${ledPreviewData[i * 3]}, ${ledPreviewData[i * 3 + 1]}, ${ledPreviewData[i * 3 + 2]})`,
-                                        boxShadow: isLedBroadcastEnabled ? `0 0 10px rgba(${ledPreviewData[i * 3]}, ${ledPreviewData[i * 3 + 1]}, ${ledPreviewData[i * 3 + 2]}, 0.3)` : 'none'
+                                        backgroundColor: ledPreviewData ? `rgb(${ledPreviewData[i * 3]}, ${ledPreviewData[i * 3 + 1]}, ${ledPreviewData[i * 3 + 2]})` : 'transparent',
+                                        boxShadow: (isLedBroadcastEnabled && ledPreviewData) ? `0 0 10px rgba(${ledPreviewData[i * 3]}, ${ledPreviewData[i * 3 + 1]}, ${ledPreviewData[i * 3 + 2]}, 0.3)` : 'none'
                                     }}
                                 />
                             ))
