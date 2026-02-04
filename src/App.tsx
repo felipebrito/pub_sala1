@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ThreeRenderer } from './core/ThreeRenderer'
 import { TEST_VIDEOS } from './constants/videos';
-import { Play, Pause, Grid3X3, MousePointer2, ExternalLink, RotateCcw } from 'lucide-react'
+import { Play, Pause, Grid3X3, MousePointer2, ExternalLink, RotateCcw, Plus, Minus } from 'lucide-react'
 import { io } from 'socket.io-client';
 
 // Types
@@ -34,6 +34,33 @@ const createDefaultGrid = (rows: number, cols: number, width = 360, height = 202
         grid.push(row);
     }
     return grid;
+};
+
+import { WarpMath } from './core/WarpMath';
+
+// Resample grid to new resolution while preserving shape
+const resampleGrid = (
+    oldGrid: Point[][],
+    oldRows: number,
+    oldCols: number,
+    newRows: number,
+    newCols: number,
+    mode: 'linear' | 'bicubic'
+): Point[][] => {
+    const newGrid: Point[][] = [];
+    for (let r = 0; r < newRows; r++) {
+        const row: Point[] = [];
+        for (let c = 0; c < newCols; c++) {
+            const u = c / (newCols - 1);
+            const v = r / (newRows - 1);
+
+            // Interpolate from old grid
+            const pt = WarpMath.interpolate(u, v, oldGrid, oldCols, oldRows, mode);
+            row.push(pt);
+        }
+        newGrid.push(row);
+    }
+    return newGrid;
 };
 
 // Auto-calculate internal points (P11, P12, P21, P22) for a 4x4 grid using Linear Coons Patch approximation
@@ -393,16 +420,14 @@ export default function App() {
     }, []);
 
     // 4. Update Renderer on Config Change (Crop/Warp)
+    // This effect now ONLY handles non-drag updates (initial load, undo, reset, crop sliders)
     useEffect(() => {
         if (!rendererRef.current) return;
         projectors.forEach((proj, i) => {
             rendererRef.current?.updateInputCrop(i, proj.crop);
             if (proj.edgeBlend) rendererRef.current?.updateEdgeBlend(i, proj.edgeBlend);
-            // We usually update grid on Drag, but this ensures non-drag updates (undo/reset) work
             rendererRef.current?.updateGridWarp(i, proj.grid, proj.rows, proj.cols, proj.mode);
         });
-        // Save to LocalStorage
-        localStorage.setItem('lumina-config-v4', JSON.stringify(projectors));
     }, [projectors]);
 
     // Crossfade Logic
@@ -447,7 +472,7 @@ export default function App() {
         requestAnimationFrame(animate);
     };
 
-    // Keyboard Shortcuts for Trigger
+    // Keyboard Shortcuts for Trigger & Precision Move
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             // Space or 'T' to trigger Main
@@ -460,10 +485,31 @@ export default function App() {
                 console.log("Forcing Return to Idle");
                 fadeTo('IDLE');
             }
+
+            // Arrow keys for precision move
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && selectedPoints.length > 0) {
+                e.preventDefault();
+                const step = e.shiftKey ? 5 : 1;
+                let dx = 0, dy = 0;
+                if (e.key === 'ArrowUp') dy = -step;
+                if (e.key === 'ArrowDown') dy = step;
+                if (e.key === 'ArrowLeft') dx = -step;
+                if (e.key === 'ArrowRight') dx = step;
+
+                updateProjector(selectedProjector, active => {
+                    const newGrid = active.grid.map(row => row.map(p => ({ ...p })));
+                    selectedPoints.forEach(pt => {
+                        newGrid[pt.r][pt.c].x += dx;
+                        newGrid[pt.r][pt.c].y += dy;
+                    });
+                    if (active.mode === 'bicubic') return { ...active, grid: calculateInternalPoints(newGrid) };
+                    return { ...active, grid: newGrid };
+                });
+            }
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [playbackState]);
+    }, [playbackState, selectedPoints, selectedProjector]);
 
     // OSC Command Listener
     useEffect(() => {
@@ -576,20 +622,15 @@ export default function App() {
             let newGrid = prev.grid;
 
             if (mode === 'bicubic') {
-                // Swithing to Bezier: Upgrade to 4x4 if not already compatible
-                if (prev.rows < 4) {
-                    newRows = 4;
-                    newCols = 4;
-                    // Resample simple 2x2 or 3x3 to 4x4 linear initial state
-                    newGrid = createDefaultGrid(4, 4);
-                    // ideally we should preserve corners, but reset is safer for now to avoid complexity
+                // Switching to Bezier: Ensure at least 4x4 for useful cubic patches
+                if (prev.rows < 4 || prev.cols < 4) {
+                    newRows = Math.max(4, prev.rows);
+                    newCols = Math.max(4, prev.cols);
+                    newGrid = resampleGrid(prev.grid, prev.rows, prev.cols, newRows, newCols, prev.mode);
                 }
-            } else {
-                // Switching to Quad: Downgrade to 2x2
-                newRows = 2;
-                newCols = 2;
-                newGrid = createDefaultGrid(2, 2);
             }
+            // Note: We don't downgrade to 2x2 automatically when switching to linear,
+            // to allow linear interpolation on higher density grids.
 
             return {
                 ...prev,
@@ -599,7 +640,25 @@ export default function App() {
                 grid: newGrid
             };
         });
-        setSelectedPoints([]); // Clear selection
+        setSelectedPoints([]);
+    };
+
+    const changeGridResolution = (dRows: number, dCols: number) => {
+        updateProjector(selectedProjector, prev => {
+            const newRows = Math.max(2, prev.rows + dRows);
+            const newCols = Math.max(2, prev.cols + dCols);
+
+            // Critical: Resample to maintain visual shape
+            const newGrid = resampleGrid(prev.grid, prev.rows, prev.cols, newRows, newCols, prev.mode);
+
+            return {
+                ...prev,
+                rows: newRows,
+                cols: newCols,
+                grid: newGrid
+            };
+        });
+        setSelectedPoints([]);
     };
 
     const updateCrop = (field: keyof Crop, value: number) => {
@@ -612,41 +671,38 @@ export default function App() {
     const handleDragStart = (projIdx: number, rStart: number, cStart: number, e: React.MouseEvent) => {
         e.preventDefault();
 
-        // 1. Update Selection
-        let newSelection = [...selectedPoints];
-        const isSelected = newSelection.find(p => p.r === rStart && p.c === cStart);
-
-        if (e.shiftKey || e.ctrlKey) {
-            if (isSelected) newSelection = newSelection.filter(p => p.r !== rStart || p.c !== cStart);
-            else newSelection.push({ r: rStart, c: cStart });
-        } else {
-            if (!isSelected) newSelection = [{ r: rStart, c: cStart }];
+        // Update selection if not clicking on already selected point
+        const isSelected = selectedPoints.some(p => p.r === rStart && p.c === cStart);
+        if (!isSelected && !e.shiftKey) {
+            setSelectedPoints([{ r: rStart, c: cStart }]);
+            selectionRef.current = [{ r: rStart, c: cStart }];
         }
 
-        setSelectedPoints(newSelection);
-        selectionRef.current = newSelection;
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const initialGridSnapshot = projectors[projIdx].grid.map(row => row.map(pt => ({ ...pt })));
 
-        // 2. Drag
-        const onMove = (m: MouseEvent) => {
-            const dx = m.movementX;
-            const dy = m.movementY;
+        // Use a ref-like object for "hot" variables to be read by RequestAnimationFrame
+        const latestDelta = { x: 0, y: 0 };
+        let rafId: number;
+
+        const syncDrag = () => {
+            const dx = latestDelta.x;
+            const dy = latestDelta.y;
 
             setProjectors(prev => {
                 const next = [...prev];
                 const active = next[projIdx];
-                let newGrid = active.grid.map(row => row.map(pt => ({ ...pt })));
+                let newGrid = initialGridSnapshot.map(row => row.map(pt => ({ ...pt })));
 
-                // If moving a CORNER in Bezier mode, we must also move its adjacent handles
-                // to maintain their relative position to the corner.
                 const corners = [
-                    { r: 0, c: 0 }, { r: 0, c: 3 },
-                    { r: 3, c: 0 }, { r: 3, c: 3 }
+                    { r: 0, c: 0 }, { r: 0, c: active.cols - 1 },
+                    { r: active.rows - 1, c: 0 }, { r: active.rows - 1, c: active.cols - 1 }
                 ];
 
                 selectionRef.current.forEach(pt => {
                     const isCorner = active.mode === 'bicubic' && corners.some(c => c.r === pt.r && c.c === pt.c);
 
-                    // Move the point itself
                     if (newGrid[pt.r] && newGrid[pt.r][pt.c]) {
                         newGrid[pt.r][pt.c].x += dx;
                         newGrid[pt.r][pt.c].y += dy;
@@ -654,35 +710,84 @@ export default function App() {
 
                     // Move Handles relative to corner if corner moved
                     if (isCorner) {
-                        // Find neighbors (handles)
-                        // Top-Left (0,0) -> (0,1) and (1,0)
-                        if (pt.r === 0 && pt.c === 0) { newGrid[0][1].x += dx; newGrid[0][1].y += dy; newGrid[1][0].x += dx; newGrid[1][0].y += dy; }
-                        // Top-Right (0,3) -> (0,2) and (1,3)
-                        if (pt.r === 0 && pt.c === 3) { newGrid[0][2].x += dx; newGrid[0][2].y += dy; newGrid[1][3].x += dx; newGrid[1][3].y += dy; }
-                        // Bottom-Left (3,0) -> (2,0) and (3,1)
-                        if (pt.r === 3 && pt.c === 0) { newGrid[2][0].x += dx; newGrid[2][0].y += dy; newGrid[3][1].x += dx; newGrid[3][1].y += dy; }
-                        // Bottom-Right (3,3) -> (2,3) and (3,2)
-                        if (pt.r === 3 && pt.c === 3) { newGrid[2][3].x += dx; newGrid[2][3].y += dy; newGrid[3][2].x += dx; newGrid[3][2].y += dy; }
+                        const r = pt.r; const c = pt.c;
+                        const rowH = (r === 0) ? 1 : active.rows - 2;
+                        const colH = (c === 0) ? 1 : active.cols - 2;
+                        if (newGrid[r][colH]) { newGrid[r][colH].x += dx; newGrid[r][colH].y += dy; }
+                        if (newGrid[rowH][c]) { newGrid[rowH][c].x += dx; newGrid[rowH][c].y += dy; }
                     }
                 });
 
-                // Recalculate internal points for Bezier smoothing
-                if (active.mode === 'bicubic') {
+                if (active.mode === 'bicubic' && active.rows === 4 && active.cols === 4) {
                     newGrid = calculateInternalPoints(newGrid);
                 }
 
                 next[projIdx] = { ...active, grid: newGrid };
+
+                // DIRECT RENDERER UPDATE (Low Latency)
+                if (rendererRef.current) {
+                    rendererRef.current.updateGridWarp(projIdx, newGrid, active.rows, active.cols, active.mode);
+                }
+
                 return next;
             });
+
+            rafId = requestAnimationFrame(syncDrag);
+        };
+
+        const onMove = (m: MouseEvent) => {
+            latestDelta.x = (m.clientX - startX) / 0.9;
+            latestDelta.y = (m.clientY - startY) / 0.9;
         };
 
         const onUp = () => {
+            cancelAnimationFrame(rafId);
             window.removeEventListener('mousemove', onMove);
             window.removeEventListener('mouseup', onUp);
+            // Save to LocalStorage only when drag ends to avoid blocking hot path
+            setProjectors(prev => {
+                localStorage.setItem('lumina-config-v4', JSON.stringify(prev));
+                return prev;
+            });
         };
 
         window.addEventListener('mousemove', onMove);
         window.addEventListener('mouseup', onUp);
+        rafId = requestAnimationFrame(syncDrag);
+    };
+
+    const resetPoint = (r: number, c: number) => {
+        updateProjector(selectedProjector, active => {
+            const newGrid = active.grid.map(row => row.map(p => ({ ...p })));
+            const defaultX = (c / (active.cols - 1)) * 360;
+            const defaultY = (r / (active.rows - 1)) * 202;
+            newGrid[r][c] = { x: defaultX, y: defaultY };
+            if (active.mode === 'bicubic' && active.rows === 4 && active.cols === 4) return { ...active, grid: calculateInternalPoints(newGrid) };
+            return { ...active, grid: newGrid };
+        });
+    };
+
+    const handlePointMouseDown = (projIdx: number, r: number, c: number, e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (selectedProjector !== projIdx) setSelectedProjector(projIdx);
+
+        const isCurrentlySelected = selectedPoints.some(p => p.r === r && p.c === c);
+        if (e.shiftKey) {
+            if (isCurrentlySelected) {
+                setSelectedPoints(prev => prev.filter(p => !(p.r === r && p.c === c)));
+                selectionRef.current = selectionRef.current.filter(p => !(p.r === r && p.c === c));
+            } else {
+                setSelectedPoints(prev => [...prev, { r, c }]);
+                selectionRef.current = [...selectionRef.current, { r, c }];
+            }
+        } else {
+            if (!isCurrentlySelected) {
+                setSelectedPoints([{ r, c }]);
+                selectionRef.current = [{ r, c }];
+            }
+        }
+
+        handleDragStart(projIdx, r, c, e);
     };
 
     return (
@@ -770,6 +875,31 @@ export default function App() {
                             : 'Advanced Bezier warp with control handles.'}
                     </div>
                 </div>
+
+                {/* Grid Resolution */}
+                <div>
+                    <h2 className="text-xs font-bold text-slate-500 uppercase mb-3 flex justify-between">
+                        Grid Subdivision
+                        <span className="text-amber-500">{projectors[selectedProjector].cols}x{projectors[selectedProjector].rows}</span>
+                    </h2>
+                    <div className="space-y-2">
+                        <div className="flex items-center justify-between text-[11px] bg-slate-800/50 p-2 rounded border border-white/5">
+                            <span className="text-slate-400">Rows (Y)</span>
+                            <div className="flex gap-1">
+                                <button onClick={() => changeGridResolution(-1, 0)} className="p-1 hover:bg-white/10 rounded"><Minus size={14} /></button>
+                                <button onClick={() => changeGridResolution(1, 0)} className="p-1 hover:bg-white/10 rounded"><Plus size={14} /></button>
+                            </div>
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] bg-slate-800/50 p-2 rounded border border-white/5">
+                            <span className="text-slate-400">Cols (X)</span>
+                            <div className="flex gap-1">
+                                <button onClick={() => changeGridResolution(0, -1)} className="p-1 hover:bg-white/10 rounded"><Minus size={14} /></button>
+                                <button onClick={() => changeGridResolution(0, 1)} className="p-1 hover:bg-white/10 rounded"><Plus size={14} /></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
 
                 {/* Input Mapping */}
                 <div className="p-3 bg-white/5 rounded border border-white/5 space-y-3">
@@ -1069,96 +1199,88 @@ export default function App() {
                                 </span>
                             </div>
 
-                            {/* Canvas Container */}
-                            <div
-                                ref={containerRefs[i]}
-                                className={`rounded-sm overflow-hidden shadow-2xl ring-1 relative bg-black transition-all ${selectedProjector === i ? 'ring-amber-500/50 shadow-amber-500/10' : 'ring-white/10'
-                                    }`}
-                                style={{ width: '360px', height: '202px' }}
-                                onMouseDown={() => setSelectedProjector(i)}
-                            />
+                            {/* Canvas & Overlay Container */}
+                            <div className="relative">
+                                <div
+                                    ref={containerRefs[i]}
+                                    className={`rounded-sm overflow-hidden shadow-2xl ring-1 relative bg-black transition-all ${selectedProjector === i ? 'ring-amber-500/50 shadow-amber-500/10' : 'ring-white/10'
+                                        }`}
+                                    style={{ width: '360px', height: '202px' }}
+                                    onMouseDown={() => setSelectedProjector(i)}
+                                />
 
-                            {/* SVG Overlay */}
-                            <svg className="absolute top-6 left-0 overflow-visible" width="360" height="202">
-                                <g opacity={selectedProjector === i ? 1 : 0.3} className="transition-opacity duration-300">
+                                {/* SVG Overlay - Now perfectly aligned top-0 */}
+                                <svg
+                                    className="absolute top-0 left-0 overflow-visible pointer-events-none"
+                                    width="360" height="202"
+                                >
+                                    {/* Invisible background for Canvas double-click interaction */}
+                                    <rect
+                                        width="360" height="202" fill="transparent"
+                                        className="pointer-events-auto"
+                                        onDoubleClick={() => changeGridResolution(1, 1)}
+                                    />
 
-                                    {/* --- BEZIER VISUALIZATION --- */}
-                                    {config.mode === 'bicubic' && config.rows === 4 && (
-                                        <>
-                                            {/* Handle Lines */}
-                                            {/* Top Corners */}
-                                            <line x1={config.grid[0][0].x} y1={config.grid[0][0].y} x2={config.grid[0][1].x} y2={config.grid[0][1].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
-                                            <line x1={config.grid[0][0].x} y1={config.grid[0][0].y} x2={config.grid[1][0].x} y2={config.grid[1][0].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
+                                    <g opacity={selectedProjector === i ? 1 : 0.3} className="transition-opacity duration-300">
 
-                                            <line x1={config.grid[0][3].x} y1={config.grid[0][3].y} x2={config.grid[0][2].x} y2={config.grid[0][2].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
-                                            <line x1={config.grid[0][3].x} y1={config.grid[0][3].y} x2={config.grid[1][3].x} y2={config.grid[1][3].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
-
-                                            {/* Bottom Corners */}
-                                            <line x1={config.grid[3][0].x} y1={config.grid[3][0].y} x2={config.grid[3][1].x} y2={config.grid[3][1].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
-                                            <line x1={config.grid[3][0].x} y1={config.grid[3][0].y} x2={config.grid[2][0].x} y2={config.grid[2][0].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
-
-                                            <line x1={config.grid[3][3].x} y1={config.grid[3][3].y} x2={config.grid[3][2].x} y2={config.grid[3][2].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
-                                            <line x1={config.grid[3][3].x} y1={config.grid[3][3].y} x2={config.grid[2][3].x} y2={config.grid[2][3].y} stroke="#60a5fa" strokeWidth="1" opacity="0.5" />
-
-                                            {/* Draw Control Points (Corners + Handles) */}
-                                            {config.grid.map((row, r) => row.map((pt, c) => {
-                                                // Ignore internal points (rows 1-2, cols 1-2)
-                                                if (r > 0 && r < 3 && c > 0 && c < 3) return null;
-
-                                                const isCorner = (r === 0 || r === 3) && (c === 0 || c === 3);
-                                                const isSelected = selectedPoints.some(p => p.r === r && p.c === c);
-
-                                                return (
-                                                    <g
-                                                        key={`${r}-${c}`}
-                                                        style={{ cursor: isCorner ? 'move' : 'crosshair' }}
-                                                        onMouseDown={(e) => handleDragStart(i, r, c, e)}
-                                                    >
-                                                        <circle cx={pt.x} cy={pt.y} r="15" fill="transparent" />
-                                                        <circle
-                                                            cx={pt.x} cy={pt.y} r={isCorner ? 5 : 3}
-                                                            fill={isSelected ? '#fff' : (isCorner ? '#f59e0b' : '#60a5fa')}
-                                                            stroke="#000" strokeWidth="1"
-                                                        />
-                                                    </g>
-                                                )
-                                            }))}
-                                        </>
-                                    )}
-
-                                    {/* --- LINEAR (QUAD) VISUALIZATION --- */}
-                                    {config.mode === 'linear' && (
-                                        <>
-                                            <polygon
-                                                points={`${config.grid[0][0].x},${config.grid[0][0].y} ${config.grid[0][1].x},${config.grid[0][1].y} ${config.grid[1][1].x},${config.grid[1][1].y} ${config.grid[1][0].x},${config.grid[1][0].y}`}
-                                                fill="none" stroke="#f59e0b" strokeWidth="2" opacity="0.5"
+                                        {/* --- GENERIC GRID VISUALIZATION --- */}
+                                        {/* Draw horizontal lines - Double click to add a Row */}
+                                        {config.grid.map((row, r) => (
+                                            <polyline
+                                                key={`h-${r}`}
+                                                points={row.map(p => `${p.x},${p.y}`).join(' ')}
+                                                fill="none"
+                                                stroke={config.mode === 'bicubic' ? '#60a5fa' : '#f59e0b'}
+                                                strokeWidth="3"
+                                                strokeOpacity="0.3"
+                                                className="cursor-pointer pointer-events-auto hover:stroke-white/50 transition-colors"
+                                                onDoubleClick={(e) => { e.stopPropagation(); changeGridResolution(1, 0); }}
                                             />
+                                        ))}
+                                        {/* Draw vertical lines - Double click to add a Column */}
+                                        {Array.from({ length: config.cols }).map((_, c) => (
+                                            <polyline
+                                                key={`v-${c}`}
+                                                points={config.grid.map(row => `${row[c].x},${row[c].y}`).join(' ')}
+                                                fill="none"
+                                                stroke={config.mode === 'bicubic' ? '#60a5fa' : '#f59e0b'}
+                                                strokeWidth="3"
+                                                strokeOpacity="0.3"
+                                                className="cursor-pointer pointer-events-auto hover:stroke-white/50 transition-colors"
+                                                onDoubleClick={(e) => { e.stopPropagation(); changeGridResolution(0, 1); }}
+                                            />
+                                        ))}
+
+                                        <g className="pointer-events-auto">
                                             {config.grid.map((row, r) => row.map((pt, c) => {
                                                 const isSelected = selectedPoints.some(p => p.r === r && p.c === c);
+                                                const isCorner = (r === 0 || r === config.rows - 1) && (c === 0 || c === config.cols - 1);
+
                                                 return (
                                                     <g
                                                         key={`${r}-${c}`}
                                                         style={{ cursor: 'move' }}
-                                                        onMouseDown={(e) => handleDragStart(i, r, c, e)}
+                                                        onMouseDown={(e) => handlePointMouseDown(i, r, c, e)}
+                                                        onDoubleClick={(e) => { e.stopPropagation(); resetPoint(r, c); }}
                                                     >
-                                                        <circle cx={pt.x} cy={pt.y} r="15" fill="transparent" />
+                                                        <circle cx={pt.x} cy={pt.y} r="10" fill="transparent" />
                                                         <circle
-                                                            cx={pt.x} cy={pt.y} r="6"
-                                                            fill={isSelected ? '#fff' : '#f59e0b'}
+                                                            cx={pt.x} cy={pt.y} r={isCorner ? 5 : 3.5}
+                                                            fill={isSelected ? '#fff' : (isCorner ? '#f59e0b' : '#60a5fa')}
                                                             stroke="#000" strokeWidth="1"
+                                                            className="transition-none"
                                                         />
                                                     </g>
-                                                )
+                                                );
                                             }))}
-                                        </>
-                                    )}
-
-                                </g>
-                            </svg>
+                                        </g>
+                                    </g>
+                                </svg>
+                            </div>
                         </div>
                     ))}
                 </div>
-            </main >
-        </div >
+            </main>
+        </div>
     );
 }
