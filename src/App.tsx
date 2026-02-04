@@ -329,7 +329,11 @@ export default function App() {
 
     // Video State
     const [isPlaying, setIsPlaying] = useState(false);
-    const [videoUrl, setVideoUrl] = useState(() => localStorage.getItem('lumina-video-url') || '');
+    const [videoUrl, setVideoUrl] = useState(() => {
+        const saved = localStorage.getItem('lumina-video-url') || '';
+        // Don't load blob URLs from localStorage (they're dead)
+        return saved.startsWith('blob:') ? '' : saved;
+    });
 
     // Playlist State
     const [idleVideoUrl, setIdleVideoUrl] = useState<string>('');
