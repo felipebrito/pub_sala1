@@ -145,7 +145,7 @@ const OutputWindow = ({ index }: { index: number }) => {
 
         // Sync Function
         const sync = () => {
-            const str = localStorage.getItem('lumina-config-v3');
+            const str = localStorage.getItem('lumina-config-v5'); // Updated to v5
             if (str) {
                 try {
                     const configs: ProjectorConfig[] = JSON.parse(str);
@@ -154,6 +154,12 @@ const OutputWindow = ({ index }: { index: number }) => {
                         setConfig(conf);
                         r.updateInputCrop(index, conf.crop);
                         r.updateGridWarp(index, conf.grid, conf.rows, conf.cols, conf.mode);
+                        if (conf.edgeBlend) r.updateEdgeBlend(index, conf.edgeBlend);
+                        if (conf.masks && typeof r.updateMasks === 'function') {
+                            try {
+                                r.updateMasks(index, conf.masks.map(m => m.points));
+                            } catch (err) { console.error('Mask update failed', err); }
+                        }
                     }
                 } catch (e) { console.error('Config parse error', e); }
             }

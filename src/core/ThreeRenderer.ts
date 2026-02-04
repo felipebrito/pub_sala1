@@ -26,6 +26,11 @@ export class ThreeRenderer {
     private texture: THREE.VideoTexture | null = null;
     private animationId: number | null = null;
 
+    // Masking Resources (Per Projector)
+    private maskCanvases: HTMLCanvasElement[] = [];
+    private maskContexts: CanvasRenderingContext2D[] = [];
+    private maskTextures: THREE.CanvasTexture[] = [];
+
     // Cache for Auto-Resize Logic
     private cache: (StateCache | null)[] = [null, null, null];
 
@@ -86,12 +91,30 @@ export class ThreeRenderer {
 
             uvAttribute.needsUpdate = true;
 
+            uvAttribute.needsUpdate = true;
+
+            // Setup Masking Canvas
+            const mCanvas = document.createElement('canvas');
+            mCanvas.width = 1024;
+            mCanvas.height = 576; // 16:9 aspect
+            const mCtx = mCanvas.getContext('2d', { willReadFrequently: true })!;
+
+            // Default White
+            mCtx.fillStyle = 'white';
+            mCtx.fillRect(0, 0, 1024, 576);
+
+            const mTexture = new THREE.CanvasTexture(mCanvas);
+            mTexture.minFilter = THREE.LinearFilter;
+            mTexture.magFilter = THREE.LinearFilter;
+            mTexture.colorSpace = THREE.NoColorSpace; // Alpha/Mask data
+
+            this.maskCanvases[index] = mCanvas;
+            this.maskContexts[index] = mCtx;
+            this.maskTextures[index] = mTexture;
+
             const material = new EdgeBlendMaterial();
-            // Default Mask (White 1x1) to prevent black screen
-            const whiteData = new Uint8Array([255, 255, 255, 255]);
-            const whiteTex = new THREE.DataTexture(whiteData, 1, 1, THREE.RGBAFormat);
-            whiteTex.needsUpdate = true;
-            if (material.uniforms.maskMap) material.uniforms.maskMap.value = whiteTex;
+            // Bind Mask Texture
+            if (material.uniforms.maskMap) material.uniforms.maskMap.value = mTexture;
 
             if (this.texture) material.map = this.texture;
 
@@ -237,6 +260,38 @@ export class ThreeRenderer {
         }
     }
 
+    public updateMasks(index: number, masks: { x: number, y: number }[][]) {
+        const ctx = this.maskContexts[index];
+        const canvas = this.maskCanvases[index];
+        const texture = this.maskTextures[index];
+        if (!ctx || !canvas || !texture) return;
+
+        // Reset to White (Visible)
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw Masks (Black)
+        ctx.fillStyle = 'black';
+        ctx.beginPath();
+
+        masks.forEach(points => {
+            if (points.length < 3) return;
+            // Points are in Preview Coords (0..360, 0..202)
+            // Need to map to Canvas Coords (0..1024, 0..576)
+            const scaleX = canvas.width / 360;
+            const scaleY = canvas.height / 202;
+
+            ctx.moveTo(points[0].x * scaleX, points[0].y * scaleY);
+            for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i].x * scaleX, points[i].y * scaleY);
+            }
+            ctx.closePath();
+            ctx.fill();
+        });
+
+        texture.needsUpdate = true;
+    }
+
     private animate = () => {
         this.animationId = requestAnimationFrame(this.animate);
 
@@ -291,5 +346,9 @@ export class ThreeRenderer {
         this.scenes = [null, null, null];
         this.meshes = [null, null, null];
         this.cache = [null, null, null];
+        this.maskCanvases = [];
+        this.maskContexts = [];
+        this.maskTextures.forEach(t => t.dispose());
+        this.maskTextures = [];
     }
 }
