@@ -6,6 +6,15 @@ export interface RendererTarget {
     container: HTMLElement;
 }
 
+interface StateCache {
+    grid: { x: number; y: number }[][];
+    rows: number;
+    cols: number;
+    mode: 'linear' | 'bicubic';
+    width: number;
+    height: number;
+}
+
 export class ThreeRenderer {
     private renderers: (THREE.WebGLRenderer | null)[] = [null, null, null];
     private scenes: (THREE.Scene | null)[] = [null, null, null];
@@ -15,15 +24,8 @@ export class ThreeRenderer {
     private texture: THREE.VideoTexture | null = null;
     private animationId: number | null = null;
 
-    // Display dimensions (Virtual Canvas Resolution)
-    // If fullscreen, we might want to adapt? 
-    // Usually mapping software keeps internal resolution fixed (e.g. 1920x1080) and scales CSS.
-    // Here we use fixed small resolution for preview (360x202) but for Output we might want full res?
-    // User requested "Fullscreen".
-    // If we use Fixed Resolution geometry, the "Warping" logic operates on that resolution.
-    // If output window is 1920x1080, we should render at that resolution or scale up?
-    // For now, let's keep the logic consistent: 
-    // The renderer uses clientWidth/clientHeight of the container. 
+    // Cache for Auto-Resize Logic
+    private cache: (StateCache | null)[] = [null, null, null];
 
     constructor(targets: RendererTarget[]) {
         targets.forEach(({ index, container }) => {
@@ -36,6 +38,8 @@ export class ThreeRenderer {
                 alpha: true
             });
             renderer.setSize(width, height);
+            renderer.domElement.style.width = '100%';
+            renderer.domElement.style.height = '100%';
             renderer.setPixelRatio(window.devicePixelRatio);
 
             container.appendChild(renderer.domElement);
@@ -43,7 +47,7 @@ export class ThreeRenderer {
 
             // 2. Setup Scene
             const scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x000000); // Black background for output
+            scene.background = new THREE.Color(0x000000);
             this.scenes[index] = scene;
 
             // 3. Setup Camera
@@ -59,7 +63,7 @@ export class ThreeRenderer {
             // 4. Create Warping Mesh (High Density 32x32)
             const gridX = 32;
             const gridY = 32;
-            const geometry = new THREE.PlaneGeometry(width, height, gridX, gridY);
+            const geometry = new THREE.PlaneGeometry(width > 0 ? width : 100, height > 0 ? height : 100, gridX, gridY);
 
             // Initial UV Mapping Logic (Slicing 1/3 per projector)
             const uvAttribute = geometry.attributes.uv;
@@ -90,27 +94,18 @@ export class ThreeRenderer {
             scene.add(mesh);
             this.meshes[index] = mesh;
 
-            // Resize handler for this specific container
-            const onResize = () => {
-                const w = container.clientWidth;
-                const h = container.clientHeight;
-                renderer.setSize(w, h);
-                camera.right = w;
-                camera.top = h;
-                camera.updateProjectionMatrix();
-                // Note: Geometry is NOT resized automatically, warping points are relative to absolute Resolution.
-                // If we resize window, we stretch the canvas.
-            };
-            window.addEventListener('resize', onResize);
+            // Note: We removed the explicit "resize" event listener.
+            // We now handle resize in the animate loop for robustness.
         });
 
         this.animate();
     }
 
     public setVideo(video: HTMLVideoElement) {
+        if (!video) return;
         if (this.texture) this.texture.dispose();
 
-        console.log('[ThreeRenderer] Setting new video texture');
+        console.log('[ThreeRenderer] Setting new video texture:', video.currentSrc);
         this.texture = new THREE.VideoTexture(video);
         this.texture.colorSpace = THREE.SRGBColorSpace;
         this.texture.minFilter = THREE.LinearFilter;
@@ -120,6 +115,7 @@ export class ThreeRenderer {
             if (mesh) {
                 const material = mesh.material as THREE.MeshBasicMaterial;
                 material.map = this.texture;
+                material.color.setHex(0xffffff);
                 material.needsUpdate = true;
             }
         });
@@ -133,33 +129,26 @@ export class ThreeRenderer {
         mode: 'linear' | 'bicubic' = 'bicubic'
     ) {
         const mesh = this.meshes[index];
-        if (!mesh) return;
+        const renderer = this.renderers[index];
+        if (!mesh || !renderer) return;
+
+        const width = renderer.domElement.clientWidth;
+        const height = renderer.domElement.clientHeight;
+
+        // Cache state for auto-resize, even if current size is 0
+        this.cache[index] = {
+            grid: points, rows, cols, mode,
+            width, height
+        };
+
+        if (width === 0 || height === 0) return;
 
         const geometry = mesh.geometry;
         const positions = geometry.attributes.position;
-        const width = (geometry as any).parameters.width;
-        const height = (geometry as any).parameters.height;
 
         // Scale factor: Points come in Preview coordinates (360x202).
-        // If we are in Output mode (FullHD), we must scale points up.
-        // HACK: We assume input points are normalized 0..1 relative to Preview (360x202),
-        // OR we just normalize them now.
-        // The points from App.tsx are PIXELS (0..360, 0..202).
-        // We need to map them to CURRENT Renderer Size.
-
-        // Let's normalize points based on PREVIEW_WIDTH/HEIGHT constants (360, 202)
-        // defined in the App logic, and remap to current geometry width/height.
         const PREVIEW_WIDTH = 360;
         const PREVIEW_HEIGHT = 202;
-
-        // However, for simplicity now, let's just pass the raw points to WarpMath 
-        // and hope WarpMath handles it?
-        // No, WarpMath.interpolate returns a coordinate in the same space as input points (Pixels).
-        // If mesh is 1920x1080 but points are 0..360, warping will be tiny in top left corner.
-
-        // FIX: Normalize points before passing to Interpolator?
-        // Or Normalize output of interpolate?
-        // Best: Normalize Control Points.
 
         const normPoints = points.map(row => row.map(p => ({
             x: p.x / PREVIEW_WIDTH,
@@ -220,9 +209,33 @@ export class ThreeRenderer {
 
     private animate = () => {
         this.animationId = requestAnimationFrame(this.animate);
+
         for (let i = 0; i < 3; i++) {
-            if (this.renderers[i] && this.scenes[i] && this.cameras[i]) {
-                this.renderers[i]!.render(this.scenes[i]!, this.cameras[i]!);
+            const renderer = this.renderers[i];
+            const camera = this.cameras[i];
+            const scene = this.scenes[i];
+
+            if (renderer && scene && camera) {
+                // Auto-Resize Logic
+                const currentW = renderer.domElement.clientWidth;
+                const currentH = renderer.domElement.clientHeight;
+                const cached = this.cache[i];
+
+                if (cached && (currentW !== cached.width || currentH !== cached.height)) {
+                    if (currentW > 0 && currentH > 0) {
+                        // console.log(`[ThreeRenderer] Resizing Projector ${i} to ${currentW}x${currentH}`);
+                        renderer.setSize(currentW, currentH, false);
+                        camera.right = currentW;
+                        camera.bottom = currentH;
+                        camera.top = 0;
+                        camera.updateProjectionMatrix();
+
+                        // Force warp update with new dimensions
+                        this.updateGridWarp(i, cached.grid, cached.rows, cached.cols, cached.mode);
+                    }
+                }
+
+                renderer.render(scene, camera);
             }
         }
     }
@@ -247,5 +260,6 @@ export class ThreeRenderer {
         this.renderers = [null, null, null];
         this.scenes = [null, null, null];
         this.meshes = [null, null, null];
+        this.cache = [null, null, null];
     }
 }

@@ -94,12 +94,20 @@ const DEFAULT_CONFIGS = (): ProjectorConfig[] => [0, 1, 2].map(i => ({
 
 const OutputWindow = ({ index }: { index: number }) => {
     const containerRef = useRef<HTMLDivElement>(null);
+    const canvasWrapperRef = useRef<HTMLDivElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
     const rendererRef = useRef<ThreeRenderer | null>(null);
+    const [config, setConfig] = useState<ProjectorConfig | null>(null);
+    const [isFs, setIsFs] = useState(false);
+    const [aspectLock, setAspectLock] = useState(false);
 
+    // Initial Setup
     useEffect(() => {
-        if (!containerRef.current) return;
+        const onFs = () => setIsFs(!!document.fullscreenElement);
+        document.addEventListener('fullscreenchange', onFs);
+        if (!canvasWrapperRef.current) return;
 
+        // Hide cursor setup
         let timeout: any;
         const onMove = () => {
             document.body.style.cursor = 'default';
@@ -108,24 +116,49 @@ const OutputWindow = ({ index }: { index: number }) => {
         };
         window.addEventListener('mousemove', onMove);
 
-        const r = new ThreeRenderer([{ index, container: containerRef.current }]);
+        // Shortcuts 'F' and 'A'
+        const onKey = (e: KeyboardEvent) => {
+            const k = e.key.toLowerCase();
+            if (k === 'f') {
+                if (!document.fullscreenElement) {
+                    containerRef.current?.requestFullscreen().catch(e => console.error(e));
+                } else {
+                    document.exitFullscreen().catch(e => console.error(e));
+                }
+            }
+            if (k === 'a') {
+                setAspectLock(prev => !prev);
+            }
+        };
+        window.addEventListener('keydown', onKey);
+
+        // Init Renderer targetting wrapper
+        const r = new ThreeRenderer([{ index, container: canvasWrapperRef.current }]);
         rendererRef.current = r;
 
+        // Sync Function
         const sync = () => {
             const str = localStorage.getItem('lumina-config-v3');
             if (str) {
-                const configs: ProjectorConfig[] = JSON.parse(str);
-                const conf = configs[index];
-                if (conf) {
-                    r.updateInputCrop(index, conf.crop);
-                    r.updateGridWarp(index, conf.grid, conf.rows, conf.cols, conf.mode);
-                }
+                try {
+                    const configs: ProjectorConfig[] = JSON.parse(str);
+                    const conf = configs[index];
+                    if (conf) {
+                        setConfig(conf);
+                        r.updateInputCrop(index, conf.crop);
+                        r.updateGridWarp(index, conf.grid, conf.rows, conf.cols, conf.mode);
+                    }
+                } catch (e) { console.error('Config parse error', e); }
             }
+
             const vUrl = localStorage.getItem('lumina-video-url');
-            if (vUrl && videoRef.current && videoRef.current.src !== vUrl) {
-                videoRef.current.src = vUrl;
-                videoRef.current.play().catch(() => { });
-                r.setVideo(videoRef.current);
+            if (vUrl && videoRef.current) {
+                if (videoRef.current.src !== vUrl && vUrl !== '') {
+                    videoRef.current.src = vUrl;
+                    videoRef.current.load();
+                } else if (vUrl !== '' && videoRef.current.paused) {
+                    videoRef.current.play().catch(() => { });
+                }
             }
         };
 
@@ -134,16 +167,109 @@ const OutputWindow = ({ index }: { index: number }) => {
 
         return () => {
             r.dispose();
+            rendererRef.current = null;
             window.removeEventListener('storage', sync);
             window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('keydown', onKey);
+            document.removeEventListener('fullscreenchange', onFs);
         }
     }, [index]);
 
+    // Handle Resize keep warp correct
+    useEffect(() => {
+        const handleResize = () => {
+            if (rendererRef.current && config) {
+                // Wait for layout update
+                requestAnimationFrame(() => {
+                    rendererRef.current?.updateGridWarp(index, config.grid, config.rows, config.cols, config.mode);
+                });
+            }
+        };
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, [config, index, aspectLock]); // Dep on aspectLock to re-warp on toggle
+
+    // Sync Slave
+    useEffect(() => {
+        const channel = new BroadcastChannel('lumina_sync');
+        channel.postMessage({ type: 'HELLO' });
+        channel.onmessage = (e) => {
+            if (e.data.type === 'SYNC' && videoRef.current) {
+                const { time, paused } = e.data;
+                const v = videoRef.current;
+                // Only sync if significant drift
+                if (Math.abs(v.currentTime - time) > 0.3) {
+                    v.currentTime = time;
+                }
+                if (paused && !v.paused) v.pause();
+                if (!paused && v.paused) v.play().catch(() => { });
+            }
+        };
+        return () => channel.close();
+    }, []);
+
     return (
-        <div ref={containerRef} className="w-screen h-screen bg-black overflow-hidden relative">
-            <video ref={videoRef} className="hidden" crossOrigin="anonymous" loop muted playsInline autoPlay />
-            <div className="absolute top-4 left-4 text-white/50 text-xs font-mono opacity-50 select-none z-50 mix-blend-difference pointer-events-none">
-                OUTPUT {index + 1}
+        <div
+            ref={containerRef}
+            className="fixed inset-0 bg-black overflow-hidden cursor-default z-[9999] flex items-center justify-center"
+            onClick={() => {
+                if (!document.fullscreenElement) {
+                    containerRef.current?.requestFullscreen().catch(e => console.error(e));
+                }
+            }}
+        >
+            <div
+                ref={canvasWrapperRef}
+                style={aspectLock ? {
+                    width: '100%',
+                    height: '100%',
+                    maxWidth: '177.78vh', // 16:9 aspect ratio (16/9 * 100vh)
+                    maxHeight: '56.25vw', // 16:9 aspect ratio (9/16 * 100vw)
+                    aspectRatio: '16/9',
+                    position: 'relative'
+                } : {
+                    width: '100%',
+                    height: '100%',
+                    position: 'absolute',
+                    inset: 0
+                }}
+            />
+
+            <video
+                ref={videoRef}
+                crossOrigin="anonymous"
+                loop
+                muted
+                playsInline
+                autoPlay
+                onCanPlay={() => {
+                    if (videoRef.current && rendererRef.current) {
+                        videoRef.current.play().catch(e => console.warn(e));
+                        rendererRef.current.setVideo(videoRef.current);
+                    }
+                }}
+                style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }}
+            />
+
+            <div className="absolute top-4 left-4 text-white/50 text-xs font-mono opacity-50 select-none z-50 pointer-events-none mix-blend-difference">
+                OUTPUT {index + 1} {aspectLock && '[16:9 LOCKED]'}
+            </div>
+
+            {!isFs && (
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        containerRef.current?.requestFullscreen();
+                    }}
+                    className="absolute bottom-10 right-10 bg-white/10 hover:bg-white/30 text-white/80 px-6 py-3 rounded-full font-bold backdrop-blur transition-all border border-white/10 z-50"
+                >
+                    ⤢ Enter Fullscreen
+                </button>
+            )}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 animate-[fadeOut_5s_forwards] delay-1000">
+                <div className="bg-black/50 text-white px-4 py-2 rounded text-sm font-bold backdrop-blur">
+                    Double Click or 'F' (Fullscreen) | 'A' (Aspect Ratio)
+                </div>
             </div>
         </div>
     );
@@ -179,6 +305,27 @@ export default function App() {
     // We use a REF for selection to ensure Drag/Move has latest without re-attaching listeners constantly
     const selectionRef = useRef<{ r: number, c: number }[]>([]);
     useEffect(() => { selectionRef.current = selectedPoints }, [selectedPoints]);
+
+    // Sync Master
+    const broadcastSync = () => {
+        const channel = new BroadcastChannel('lumina_sync');
+        if (videoRef.current) {
+            channel.postMessage({
+                type: 'SYNC',
+                time: videoRef.current.currentTime,
+                paused: videoRef.current.paused,
+                src: videoRef.current.src
+            });
+        }
+        channel.close();
+    };
+
+    useEffect(() => {
+        const channel = new BroadcastChannel('lumina_sync');
+        channel.onmessage = (e) => { if (e.data.type === 'HELLO') broadcastSync(); };
+        const interval = setInterval(broadcastSync, 1000);
+        return () => { clearInterval(interval); channel.close(); };
+    }, []);
 
     // --- Effects ---
 
@@ -373,7 +520,7 @@ export default function App() {
 
     return (
         <div className="flex h-screen bg-[#0a0e1a] text-slate-300">
-            <video ref={videoRef} style={{ display: 'none' }} playsInline autoPlay muted loop />
+            <video ref={videoRef} onPlay={broadcastSync} onPause={broadcastSync} onSeeked={broadcastSync} style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }} playsInline autoPlay muted loop />
 
             <aside className="w-64 bg-[#0f1419] border-r border-white/10 p-6 flex flex-col gap-6 overflow-y-auto z-10 shrink-0">
                 <div>
