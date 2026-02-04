@@ -300,7 +300,15 @@ export default function App() {
 
     // Video State
     const [isPlaying, setIsPlaying] = useState(false);
-    const [videoUrl, setVideoUrl] = useState(() => localStorage.getItem('lumina-video-url') || '');
+    const [videoUrl, setVideoUrl] = useState(() => {
+        const saved = localStorage.getItem('lumina-video-url') || '';
+        return saved.startsWith('blob:') ? '' : saved;
+    });
+
+    // Playlist State (Idle + Main)
+    const [idleVideoUrl, setIdleVideoUrl] = useState<string>('');
+    const [mainVideoUrl, setMainVideoUrl] = useState<string>('');
+    const [playbackState, setPlaybackState] = useState<'IDLE' | 'MAIN'>('IDLE');
 
     // Refs
     const rendererRef = useRef<ThreeRenderer | null>(null);
@@ -368,22 +376,40 @@ export default function App() {
 
     // 3. Video Handling
     useEffect(() => {
-        localStorage.setItem('lumina-video-url', videoUrl);
+        // Only save non-blob URLs (blobs don't work across windows)
+        if (videoUrl && !videoUrl.startsWith('blob:')) {
+            localStorage.setItem('lumina-video-url', videoUrl);
+        }
+
         if (!videoUrl || !videoRef.current || !rendererRef.current) return;
 
         const video = videoRef.current;
         video.src = videoUrl;
         video.crossOrigin = 'anonymous';
 
+        // Robust Playback Handler
         const handleCanPlay = () => {
             if (video.videoWidth === 0) return;
             rendererRef.current?.setVideo(video);
-            video.play().then(() => setIsPlaying(true)).catch(console.error);
+
+            // Loop logic: Idle = Loop, Main = One-Shot
+            video.loop = (playbackState === 'IDLE');
+
+            video.play()
+                .then(() => setIsPlaying(true))
+                .catch(e => console.warn("Autoplay blocked/failed", e));
         };
 
         video.addEventListener('canplay', handleCanPlay);
         return () => video.removeEventListener('canplay', handleCanPlay);
-    }, [videoUrl]);
+    }, [videoUrl]); // Intentionally ONLY depends on videoUrl to avoid loops
+
+    // Helper: Safe Video Switching
+    const playVideo = (url: string, state: 'IDLE' | 'MAIN') => {
+        if (!url) return;
+        setPlaybackState(state);
+        setVideoUrl(url); // This triggers the useEffect above
+    };
 
     // --- Logic ---
 
@@ -669,32 +695,116 @@ export default function App() {
                     </div>
                 </div>
 
-                {/* Video Controls */}
-                <div>
-                    <h2 className="text-xs font-bold text-slate-500 uppercase mb-3">Video</h2>
-                    <select
-                        value={videoUrl}
-                        onChange={(e) => setVideoUrl(e.target.value)}
-                        className="w-full bg-slate-800 text-white px-3 py-2 rounded-lg text-sm mb-2 border border-slate-700 hover:border-slate-600 focus:outline-none"
-                    >
-                        <option value="">Select test video...</option>
-                        {TEST_VIDEOS.map((video, i) => (
-                            <option key={i} value={video.url}>{video.title}</option>
-                        ))}
-                    </select>
-                    <button onClick={loadVideo} className="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm mb-2">
-                        Custom URL...
-                    </button>
-                    <button
-                        onClick={togglePlayback}
-                        disabled={!videoUrl}
-                        className={`w-full px-4 py-2 rounded-lg text-sm flex items-center justify-center gap-2 ${!videoUrl ? 'bg-slate-800 text-slate-600' :
-                            isPlaying ? 'bg-amber-600 hover:bg-amber-500' : 'bg-green-600 hover:bg-green-500'
-                            }`}
-                    >
-                        {isPlaying ? <Pause size={16} /> : <Play size={16} />}
-                        {isPlaying ? 'Pause' : 'Play'}
-                    </button>
+                {/* Playlist Control */}
+                <div className="p-3 bg-white/5 rounded border border-white/5 space-y-4">
+                    <h2 className="text-xs font-bold text-slate-500 uppercase flex justify-between">
+                        Playlist Control
+                        <span className={`text-[10px] px-2 rounded ${playbackState === 'IDLE' ? 'bg-slate-700' : 'bg-red-600 text-white animate-pulse'}`}>
+                            {playbackState}
+                        </span>
+                    </h2>
+
+                    {/* IDLE SLOT */}
+                    <div className="space-y-2">
+                        <div className="text-[10px] text-slate-400 uppercase mb-1">Idle Loop (Background)</div>
+                        {/* Test Videos Dropdown */}
+                        <select
+                            value=""
+                            onChange={(e) => {
+                                if (e.target.value) {
+                                    setIdleVideoUrl(e.target.value);
+                                    playVideo(e.target.value, 'IDLE');
+                                }
+                            }}
+                            className="w-full bg-slate-800 text-white px-2 py-1 rounded text-xs border border-slate-700 hover:border-slate-600"
+                        >
+                            <option value="">Select Test Video...</option>
+                            {TEST_VIDEOS.map((video, i) => (
+                                <option key={i} value={video.url}>{video.title}</option>
+                            ))}
+                        </select>
+                        {/* Upload */}
+                        <div className="flex gap-2">
+                            <input
+                                type="file"
+                                accept="video/*"
+                                className="hidden"
+                                id="idle-upload"
+                                onChange={(e) => {
+                                    if (e.target.files?.[0]) {
+                                        const url = URL.createObjectURL(e.target.files[0]);
+                                        setIdleVideoUrl(url);
+                                        playVideo(url, 'IDLE');
+                                    }
+                                }}
+                            />
+                            <label htmlFor="idle-upload" className="bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded text-xs cursor-pointer truncate flex-1 text-center">
+                                {idleVideoUrl ? 'Upload Local File' : 'Upload Local File...'}
+                            </label>
+                            {idleVideoUrl && <button onClick={() => setIdleVideoUrl('')} className="text-red-500 hover:text-red-400">×</button>}
+                        </div>
+                    </div>
+
+                    {/* MAIN SLOT */}
+                    <div className="space-y-2">
+                        <div className="text-[10px] text-slate-400 uppercase mb-1">Main Content (One-Shot)</div>
+                        {/* Dropdown */}
+                        <select
+                            value=""
+                            onChange={(e) => {
+                                if (e.target.value) setMainVideoUrl(e.target.value);
+                            }}
+                            className="w-full bg-slate-800 text-white px-2 py-1 rounded text-xs border border-slate-700 hover:border-slate-600"
+                        >
+                            <option value="">Select Test Video...</option>
+                            {TEST_VIDEOS.map((video, i) => (
+                                <option key={i} value={video.url}>{video.title}</option>
+                            ))}
+                        </select>
+                        {/* Upload */}
+                        <div className="flex gap-2">
+                            <input
+                                type="file"
+                                accept="video/*"
+                                className="hidden"
+                                id="main-upload"
+                                onChange={(e) => {
+                                    if (e.target.files?.[0]) setMainVideoUrl(URL.createObjectURL(e.target.files[0]));
+                                }}
+                            />
+                            <label htmlFor="main-upload" className="bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded text-xs cursor-pointer truncate flex-1 text-center">
+                                {mainVideoUrl ? 'Upload Local File' : 'Upload Local File...'}
+                            </label>
+                            {mainVideoUrl && <button onClick={() => setMainVideoUrl('')} className="text-red-500 hover:text-red-400">×</button>}
+                        </div>
+                    </div>
+
+                    {/* PLAY BUTTONS */}
+                    <div className="flex gap-2 pt-2 border-t border-white/5">
+                        <button
+                            onClick={() => {
+                                if (!mainVideoUrl) return alert('No Main Video selected');
+                                setMainVideoUrl(mainVideoUrl);
+                                playVideo(mainVideoUrl, 'MAIN');
+                                if (videoRef.current) videoRef.current.currentTime = 0;
+                            }}
+                            disabled={!mainVideoUrl}
+                            className={`flex-1 py-3 font-bold rounded flex flex-col items-center justify-center ${playbackState === 'MAIN' ? 'bg-red-600 text-white shadow-[0_0_15px_rgba(220,38,38,0.5)]' : 'bg-slate-700 hover:bg-white/10'}`}
+                        >
+                            <span className="text-sm">PLAY MAIN</span>
+                        </button>
+
+                        <button
+                            onClick={() => {
+                                if (!idleVideoUrl) return alert('No Idle Video selected');
+                                playVideo(idleVideoUrl, 'IDLE');
+                            }}
+                            disabled={!idleVideoUrl}
+                            className="flex-1 py-3 bg-slate-700 hover:bg-white/10 font-bold rounded flex flex-col items-center justify-center"
+                        >
+                            <span className="text-sm">BACK TO IDLE</span>
+                        </button>
+                    </div>
                 </div>
             </aside>
 
