@@ -22,7 +22,6 @@ export class ThreeRenderer {
     private scenes: (THREE.Scene | null)[] = [null, null, null];
     private cameras: (THREE.OrthographicCamera | null)[] = [null, null, null];
     private meshes: (THREE.Mesh | null)[] = [null, null, null];
-
     private texture: THREE.VideoTexture | null = null;
     private animationId: number | null = null;
 
@@ -40,13 +39,8 @@ export class ThreeRenderer {
             const height = container.clientHeight;
 
             // 1. Setup Renderer
-            const renderer = new THREE.WebGLRenderer({
-                antialias: true,
-                alpha: true
-            });
+            const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setSize(width, height);
-            renderer.domElement.style.width = '100%';
-            renderer.domElement.style.height = '100%';
             renderer.setPixelRatio(window.devicePixelRatio);
 
             container.appendChild(renderer.domElement);
@@ -68,28 +62,19 @@ export class ThreeRenderer {
             this.cameras[index] = camera;
 
             // 4. Create Warping Mesh (High Density 32x32)
+            const geometry = new THREE.PlaneGeometry(width, height, 32, 32);
+
+            // Fix UVs to cover full texture initially (inverted Y for standard GL mapping)
+            const uvAttribute = geometry.attributes.uv;
             const gridX = 32;
             const gridY = 32;
-            const geometry = new THREE.PlaneGeometry(width > 0 ? width : 100, height > 0 ? height : 100, gridX, gridY);
-
-            // Initial UV Mapping Logic (Slicing 1/3 per projector)
-            const uvAttribute = geometry.attributes.uv;
-            const sliceWidth = 1.0 / 3.0;
-            const uMin = index * sliceWidth;
-            const uMax = (index + 1) * sliceWidth;
-
-            for (let iy = 0; iy <= gridY; iy++) {
-                const v = 1 - (iy / gridY); // V goes 1..0
-                for (let ix = 0; ix <= gridX; ix++) {
-                    const uLocal = ix / gridX; // 0..1
-                    const uGlobal = uMin + uLocal * (uMax - uMin);
-
-                    const idx = iy * (gridX + 1) + ix;
-                    uvAttribute.setXY(idx, uGlobal, v);
-                }
+            for (let i = 0; i < uvAttribute.count; i++) {
+                const ix = i % (gridX + 1);
+                const iy = Math.floor(i / (gridX + 1));
+                const u = ix / gridX;
+                const v = 1 - (iy / gridY); // Standard UV (Bottom-Left=0,0)
+                uvAttribute.setXY(i, u, v);
             }
-
-            uvAttribute.needsUpdate = true;
 
             uvAttribute.needsUpdate = true;
 
@@ -99,14 +84,14 @@ export class ThreeRenderer {
             mCanvas.height = 576; // 16:9 aspect
             const mCtx = mCanvas.getContext('2d', { willReadFrequently: true })!;
 
-            // Default White
+            // Default White (Visible)
             mCtx.fillStyle = 'white';
             mCtx.fillRect(0, 0, 1024, 576);
 
             const mTexture = new THREE.CanvasTexture(mCanvas);
             mTexture.minFilter = THREE.LinearFilter;
             mTexture.magFilter = THREE.LinearFilter;
-            mTexture.colorSpace = THREE.NoColorSpace; // Alpha/Mask data
+            mTexture.colorSpace = THREE.NoColorSpace;
 
             this.maskCanvases[index] = mCanvas;
             this.maskContexts[index] = mCtx;
@@ -121,9 +106,6 @@ export class ThreeRenderer {
             const mesh = new THREE.Mesh(geometry, material);
             scene.add(mesh);
             this.meshes[index] = mesh;
-
-            // Note: We removed the explicit "resize" event listener.
-            // We now handle resize in the animate loop for robustness.
         });
 
         this.animate();
@@ -138,12 +120,11 @@ export class ThreeRenderer {
         this.texture.colorSpace = THREE.SRGBColorSpace;
         this.texture.minFilter = THREE.LinearFilter;
         this.texture.magFilter = THREE.LinearFilter;
-
+        // Make sure texture is available to all shaders
         this.meshes.forEach(mesh => {
             if (mesh) {
                 const material = mesh.material as EdgeBlendMaterial;
                 material.map = this.texture;
-                // ShaderMaterial doesn't have .color property
                 material.needsUpdate = true;
             }
         });
@@ -163,7 +144,7 @@ export class ThreeRenderer {
         const width = renderer.domElement.clientWidth;
         const height = renderer.domElement.clientHeight;
 
-        // Cache state for auto-resize, even if current size is 0
+        // Cache state for auto-resize
         this.cache[index] = {
             grid: points, rows, cols, mode,
             width, height
@@ -190,11 +171,7 @@ export class ThreeRenderer {
             const v = iy / meshSegsY; // 0..1
             for (let ix = 0; ix <= meshSegsX; ix++) {
                 const u = ix / meshSegsX; // 0..1
-
-                // Interpolate using NORMALIZED coords (result is 0..1)
                 const posNorm = WarpMath.interpolate(u, v, normPoints, cols, rows, mode);
-
-                // Scale to actual mesh size
                 const idx = iy * (meshSegsX + 1) + ix;
                 positions.setXYZ(idx, posNorm.x * width, posNorm.y * height, 0);
             }
@@ -213,9 +190,9 @@ export class ThreeRenderer {
         const uMin = crop.x;
         const uMax = crop.x + crop.width;
 
-        const vMin = crop.y; // Assuming uniform expects raw crop values
-        const vMax = crop.y + crop.height; // Assuming uniform expects raw crop values
-
+        // Invert Y for V (Standard GL: Bottom-Left origin)
+        // If crop.y is Top (0), and height is 1. (0 to 1).
+        // we want v from 1 to 0. (Top to Bottom).
         const vTop = 1 - crop.y;
         const vBottom = 1 - (crop.y + crop.height);
 
@@ -223,7 +200,7 @@ export class ThreeRenderer {
         const gridY = 32;
 
         for (let iy = 0; iy <= gridY; iy++) {
-            const vParam = iy / gridY; // 0 (top) to 1 (bottom)
+            const vParam = iy / gridY; // 0 (top) to 1 (bottom) in geometry
             const v = vTop + (vBottom - vTop) * vParam;
 
             for (let ix = 0; ix <= gridX; ix++) {
@@ -241,7 +218,13 @@ export class ThreeRenderer {
         if (mesh) {
             const mat = mesh.material as EdgeBlendMaterial;
             if (mat.uniforms && mat.uniforms.cropInfo) {
-                mat.uniforms.cropInfo.value.set(uMin, uMax, vMin, vMax);
+                // Pass raw UV bounds? No, pass U range and V range.
+                // Shader calculates local UV.
+                // We pass Umin, Umax, Vmin, Vmax (in standard 0..1 space).
+                // Actually Vmin, Vmax should be the bounds in 0..1 texture space?
+                // Our V goes from vTop (1) to vBottom (0).
+                // Let's pass ( uMin, uMax, vBottom, vTop ).
+                mat.uniforms.cropInfo.value.set(uMin, uMax, vBottom, vTop);
             }
         }
     }
@@ -257,6 +240,29 @@ export class ThreeRenderer {
             mat.uniforms.blendTop.value = blend.top;
             mat.uniforms.blendBottom.value = blend.bottom;
             if (blend.gamma !== undefined) mat.uniforms.gamma.value = blend.gamma;
+        }
+    }
+
+    public resize(index: number, width: number, height: number) {
+        const renderer = this.renderers[index];
+        const camera = this.cameras[index];
+        if (!renderer || !camera) return;
+
+        renderer.setSize(width, height);
+
+        // Update Ortho Camera View Volume
+        // 0, width, 0, height.
+        camera.right = width;
+        camera.bottom = height;
+        camera.updateProjectionMatrix();
+
+        // Re-apply Warp with new dimensions
+        const cache = this.cache[index];
+        if (cache) {
+            cache.width = width;
+            cache.height = height;
+            // Force re-calculation
+            this.updateGridWarp(index, cache.grid, cache.rows, cache.cols, cache.mode);
         }
     }
 
@@ -276,8 +282,7 @@ export class ThreeRenderer {
 
         masks.forEach(points => {
             if (points.length < 3) return;
-            // Points are in Preview Coords (0..360, 0..202)
-            // Need to map to Canvas Coords (0..1024, 0..576)
+            // Scale from Preview (360x202) to Canvas (1024x576)
             const scaleX = canvas.width / 360;
             const scaleY = canvas.height / 202;
 
@@ -301,25 +306,6 @@ export class ThreeRenderer {
             const scene = this.scenes[i];
 
             if (renderer && scene && camera) {
-                // Auto-Resize Logic
-                const currentW = renderer.domElement.clientWidth;
-                const currentH = renderer.domElement.clientHeight;
-                const cached = this.cache[i];
-
-                if (cached && (currentW !== cached.width || currentH !== cached.height)) {
-                    if (currentW > 0 && currentH > 0) {
-                        // console.log(`[ThreeRenderer] Resizing Projector ${ i } to ${ currentW }x${ currentH } `);
-                        renderer.setSize(currentW, currentH, false);
-                        camera.right = currentW;
-                        camera.bottom = currentH;
-                        camera.top = 0;
-                        camera.updateProjectionMatrix();
-
-                        // Force warp update with new dimensions
-                        this.updateGridWarp(i, cached.grid, cached.rows, cached.cols, cached.mode);
-                    }
-                }
-
                 renderer.render(scene, camera);
             }
         }
@@ -327,21 +313,13 @@ export class ThreeRenderer {
 
     public dispose() {
         if (this.animationId) cancelAnimationFrame(this.animationId);
-
-        this.renderers.forEach(r => {
-            if (r?.domElement.parentElement) {
-                r.domElement.parentElement.removeChild(r.domElement);
-            }
-            r?.dispose();
-        });
-
-        if (this.texture) this.texture.dispose();
-
+        this.renderers.forEach(r => r?.dispose());
         this.meshes.forEach(m => {
-            m?.geometry.dispose();
-            (m?.material as THREE.Material)?.dispose();
+            if (m) {
+                m.geometry.dispose();
+                (m.material as THREE.Material).dispose();
+            }
         });
-
         this.renderers = [null, null, null];
         this.scenes = [null, null, null];
         this.meshes = [null, null, null];

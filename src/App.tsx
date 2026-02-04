@@ -15,7 +15,9 @@ interface ProjectorConfig {
     crop: Crop;
     edgeBlend: EdgeBlendConfig;
     masks: Mask[];
-    mode: 'linear' | 'bicubic'; // visualization/interaction mode: linear=Quad (2x2), bicubic=Bezier (Handles)
+    mode: 'linear' | 'bicubic';
+    flipH?: boolean;
+    flipV?: boolean;
 }
 
 // Helper: Equidistant Grid
@@ -95,8 +97,11 @@ const DEFAULT_CONFIGS = (): ProjectorConfig[] => [0, 1, 2].map(i => ({
         width: 1 / 3,
         height: 1
     },
+
     edgeBlend: { left: 0, right: 0, top: 0, bottom: 0, gamma: 1.0 },
-    masks: []
+    masks: [],
+    flipH: false,
+    flipV: false
 }));
 
 const OutputWindow = ({ index }: { index: number }) => {
@@ -191,16 +196,19 @@ const OutputWindow = ({ index }: { index: number }) => {
     // Handle Resize keep warp correct
     useEffect(() => {
         const handleResize = () => {
-            if (rendererRef.current && config) {
-                // Wait for layout update
-                requestAnimationFrame(() => {
-                    rendererRef.current?.updateGridWarp(index, config.grid, config.rows, config.cols, config.mode);
-                });
+            if (rendererRef.current && canvasWrapperRef.current) {
+                // Resize Renderer to match Wrapper (which is 100% of window)
+                const w = window.innerWidth;
+                const h = window.innerHeight;
+                rendererRef.current.resize(index, w, h);
             }
         };
+        // Trigger once on mount/new renderer
+        handleResize();
+
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
-    }, [config, index, aspectLock]); // Dep on aspectLock to re-warp on toggle
+    }, [index]);
 
     // Sync Slave
     useEffect(() => {
@@ -233,18 +241,21 @@ const OutputWindow = ({ index }: { index: number }) => {
         >
             <div
                 ref={canvasWrapperRef}
-                style={aspectLock ? {
-                    width: '100%',
-                    height: '100%',
-                    maxWidth: '177.78vh', // 16:9 aspect ratio (16/9 * 100vh)
-                    maxHeight: '56.25vw', // 16:9 aspect ratio (9/16 * 100vw)
-                    aspectRatio: '16/9',
-                    position: 'relative'
-                } : {
-                    width: '100%',
-                    height: '100%',
-                    position: 'absolute',
-                    inset: 0
+                style={{
+                    ...(aspectLock ? {
+                        width: '100%',
+                        height: '100%',
+                        maxWidth: '177.78vh', // 16:9 aspect ratio (16/9 * 100vh)
+                        maxHeight: '56.25vw', // 16:9 aspect ratio (9/16 * 100vw)
+                        aspectRatio: '16/9',
+                        position: 'relative'
+                    } : {
+                        width: '100%',
+                        height: '100%',
+                        position: 'absolute',
+                        inset: 0
+                    }),
+                    transform: config ? `scale(${config.flipH ? -1 : 1}, ${config.flipV ? -1 : 1})` : 'none'
                 }}
             />
 
@@ -657,6 +668,35 @@ export default function App() {
                                 />
                             </div>
                         ))}
+
+                        <div className="flex gap-4 pt-2">
+                            <label className="flex items-center gap-2 text-[10px] text-slate-400 uppercase cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={projectors[selectedProjector].flipH || false}
+                                    onChange={(e) => {
+                                        const newConfigs = [...projectors];
+                                        newConfigs[selectedProjector].flipH = e.target.checked;
+                                        setProjectors(newConfigs);
+                                    }}
+                                    className="accent-amber-500"
+                                />
+                                Flip H
+                            </label>
+                            <label className="flex items-center gap-2 text-[10px] text-slate-400 uppercase cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={projectors[selectedProjector].flipV || false}
+                                    onChange={(e) => {
+                                        const newConfigs = [...projectors];
+                                        newConfigs[selectedProjector].flipV = e.target.checked;
+                                        setProjectors(newConfigs);
+                                    }}
+                                    className="accent-amber-500"
+                                />
+                                Flip V
+                            </label>
+                        </div>
                     </div>
                 </div>
 
