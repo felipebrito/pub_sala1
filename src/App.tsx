@@ -416,6 +416,7 @@ export default function App() {
     const idleVideoRef = useRef<HTMLVideoElement | null>(null);
     const mainVideoRef = useRef<HTMLVideoElement | null>(null);
     const containerRefs = [useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null)];
+    const sourceMonitorRef = useRef<HTMLCanvasElement>(null);
 
     // We use a REF for selection to ensure Drag/Move has latest without re-attaching listeners constantly
     const selectionRef = useRef<{ r: number, c: number }[]>([]);
@@ -671,6 +672,43 @@ export default function App() {
 
                         sendLedData(pixelData);
                         setLedPreviewData(pixelData);
+                    }
+
+                    // Update LED Monitor in Sidebar
+                    if (sourceMonitorRef.current && rendererRef.current) {
+                        const ctx = sourceMonitorRef.current.getContext('2d');
+                        if (ctx) {
+                            const monW = sourceMonitorRef.current.width;
+                            const monH = sourceMonitorRef.current.height;
+                            ctx.clearRect(0, 0, monW, monH);
+
+                            // Draw the raw sampling row onto the monitor (zoomed in visually)
+                            const video = (ledSampleMethod === 'VIDEO') ? mainVideoRef.current : (mixValue > 0.5 ? mainVideoRef.current : idleVideoRef.current);
+                            if (video && video.readyState >= 2) {
+                                // Draw thumbnail of video
+                                ctx.globalAlpha = 0.5;
+                                ctx.drawImage(video, 0, 0, monW, monH);
+                                ctx.globalAlpha = 1.0;
+
+                                // Draw sampling line on thumbnail
+                                const yPos = (ledDataRowLine / 1081) * monH;
+                                ctx.strokeStyle = '#3b82f6';
+                                ctx.lineWidth = 2;
+                                ctx.beginPath();
+                                ctx.moveTo(0, yPos);
+                                ctx.lineTo(monW, yPos);
+                                ctx.stroke();
+
+                                // Draw a representative "glow" of the sampled data at the bottom of thumbnail
+                                if (pixelData) {
+                                    const step = monW / 180;
+                                    for (let i = 0; i < 180; i++) {
+                                        ctx.fillStyle = `rgb(${pixelData[i * 3]},${pixelData[i * 3 + 1]},${pixelData[i * 3 + 2]})`;
+                                        ctx.fillRect(i * step, monH - 10, step + 1, 10);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 lastTime = time;
@@ -993,6 +1031,23 @@ export default function App() {
                                 </div>
                             </div>
                         )}
+
+                        <div className="mt-3 pt-3 border-t border-white/5">
+                            <div className="text-[9px] uppercase font-bold text-white/20 mb-2">Live Loop Monitor</div>
+                            <div className="relative rounded overflow-hidden bg-black aspect-video border border-white/10">
+                                <canvas
+                                    ref={sourceMonitorRef}
+                                    width="200" height="112"
+                                    className="w-full h-full"
+                                />
+                                <div className="absolute top-1 left-1 bg-black/60 px-1 rounded text-[7px] text-white/50 uppercase font-mono">
+                                    Raw Source
+                                </div>
+                            </div>
+                            <div className="text-[8px] text-slate-600 mt-1 italic">
+                                * Blue line shows clean video sampling coordinates.
+                            </div>
+                        </div>
                     </div>
                 </div>
 
