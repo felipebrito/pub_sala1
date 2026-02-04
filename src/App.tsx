@@ -416,22 +416,23 @@ export default function App() {
         const handleCanPlay = () => {
             if (video.videoWidth === 0) return;
             rendererRef.current?.setVideo(video);
-            if (playbackState === 'IDLE') {
-                video.loop = true;
-            } else {
-                video.loop = false;
-            }
             video.play().then(() => setIsPlaying(true)).catch(console.error);
         };
 
         video.addEventListener('canplay', handleCanPlay);
         return () => video.removeEventListener('canplay', handleCanPlay);
-    }, [videoUrl, playbackState]);
+    }, [videoUrl]);
 
     // Helper to play a video
     const playVideo = (url: string, state: 'IDLE' | 'MAIN') => {
         setVideoUrl(url);
         setPlaybackState(state);
+        // Set loop based on state
+        setTimeout(() => {
+            if (videoRef.current) {
+                videoRef.current.loop = (state === 'IDLE');
+            }
+        }, 0);
     };
 
     // --- Logic ---
