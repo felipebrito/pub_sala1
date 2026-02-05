@@ -1,73 +1,81 @@
-# React + TypeScript + Vite
+# Lumina Recorder
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A specialized web application for creating frame-perfect, distorted video loops for projection mapping.
 
-Currently, two official plugins are available:
+![Lumina Recorder](../media/recorder-ui.png)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Overview
 
-## React Compiler
+Lumina Recorder is designed to solve the challenge of preparing content for physical projection surfaces (like curved walls or specific architectural features) without needing complex mapping software at playback time. It allows you to:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+1.  **Load** a standard video loop.
+2.  **Warp** it using a Bezier/Quad grid to fit your physical surface.
+3.  **Record** the pre-distorted output as a new video file.
+4.  **Play** the resulting file on any standard media player (VLC, QuickTime, BrightSign, etc.) and it will perfectly align with your projection.
 
-## Expanding the ESLint configuration
+## Features
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+-   **Drag & Drop Loading**: Supports MP4, WebM, and MOV formats.
+-   **Advanced Warp Engine**:
+    -   2x2 (Corner Pin), 3x3 (Bezier), or Custom Grid resolutions.
+    -   Real-time WebGL distortion using `three.js`.
+    -   Bicubic interpolation for smooth curves.
+-   **Frame-Perfect Recording**:
+    -   Automatically synchronizes recording start/stop with video playback.
+    -   Captures exact duration to ensure seamless looping.
+    -   Records at 60 FPS (hardware dependent).
+-   **Smart Conversion**:
+    -   Records raw high-quality streams (WebM/VP9).
+    -   **Auto-Converts to MP4 (H.264)** using in-browser FFmpeg (WASM) for maximum compatibility.
+    -   Falls back gracefully if hardware limits are reached.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## Tech Stack
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+-   **Framework**: React 19 + Vite
+-   **Language**: TypeScript
+-   **Graphics**: Three.js + React Three Fiber
+-   **Styling**: TailwindCSS
+-   **Video Processing**:
+    -   `MediaRecorder` API (Capture)
+    -   `@ffmpeg/ffmpeg` (WASM Conversion)
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Getting Started
+
+### Prerequisites
+
+-   Node.js (v18 or higher)
+-   npm
+
+### Installation
+
+1.  Navigate to the project directory:
+    ```bash
+    cd LuminaRecorder
+    ```
+2.  Install dependencies:
+    ```bash
+    npm install
+    ```
+
+### Running Locally
+
+ Start the development server:
+ ```bash
+ npm run dev
+ ```
+ Open `http://localhost:5173` in your browser (Chrome is recommended for best `MediaRecorder` support).
+
+### Building for Production
+
+To create a static build:
+```bash
+npm run build
 ```
+The output will be in the `dist/` directory.
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Workflow
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+1.  **Load Video**: Drop your source video file.
+2.  **Adjust Distortion**: Use the grid points to map the video to your surface. Double-click points to reset them.
+3.  **Record**: Click "Start Recording". The app will play the video once and capture the output.
+4.  **Save**: Download the final `.mp4` file.
