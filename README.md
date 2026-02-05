@@ -24,6 +24,17 @@ Simula um fluxo de trabalho profissional de projeção mapeada diretamente pelo 
   - **Integração de Hardware**: Envia dados via Serial ( USB) para controladores ESP32 rodando firmware Adalight.
   - **Assistente de Firmware**: Interface integrada para gravar/flashear a ESP32 direto do navegador.
 
+## 🎥 Lumina Recorder (Novo!)
+
+Uma ferramenta standalone para criar loops de vídeo distorcidos para projeção.
+Localizada em `./LuminaRecorder`.
+
+- **Warping**: Ajuste fino de distorção.
+- **Gravação Perfect-Loop**: Sincronia exata com o vídeo de entrada.
+- **Exportação MP4**: Conversão automática para máxima compatibilidade.
+
+[➡️ Ver Documentação do Recorder](./LuminaRecorder/README.md)
+
 ## Tecnologias Utilizadas
 
 - **Frontend**: React 18 + TypeScript + Vite + Three.js
