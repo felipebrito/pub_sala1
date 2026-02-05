@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
     - **Metric**: UV coordinate visualization with 10% markers.
 - **Persistence**: Canvas/Total Resolution settings now persist to `localStorage`, preserving the 5006px width setup across reloads.
 - **Layout Presets UI**: Moved Layout Presets to the top of the sidebar for easier access.
+- **Firmware Link**: Added a settings gear icon in the LED Bridge section linking to the firmware configuration page.
 
 ### Changed
 - **Test Patterns UI**: Updated the Test Patterns selector with new icons and labels (Pro Grid, Focus, Overlap, Metric).

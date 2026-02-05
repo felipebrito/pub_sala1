@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { ThreeRenderer } from './core/ThreeRenderer'
 import { useLedBridge } from './hooks/useLedBridge'
 import { TEST_VIDEOS } from './constants/videos';
-import { Play, Pause, Grid3X3, MousePointer2, ExternalLink, RotateCcw, Plus, Minus, ChevronDown } from 'lucide-react'
+import { Play, Pause, Grid3X3, MousePointer2, ExternalLink, RotateCcw, Plus, Minus, ChevronDown, Settings } from 'lucide-react'
 import { io } from 'socket.io-client';
 import FirmwareUpload from './components/FirmwareUpload';
 import { TestPatterns } from './components/TestPatterns';
@@ -1202,6 +1202,14 @@ export default function App() {
                                     >
                                         <RotateCcw size={10} />
                                     </button>
+                                    <a
+                                        href="/?page=firmware"
+                                        target="_blank"
+                                        className="p-1.5 bg-white/5 hover:bg-white/10 rounded border border-white/5 text-white/50 hover:text-white flex items-center justify-center"
+                                        title="Firmware Settings"
+                                    >
+                                        <Settings size={10} />
+                                    </a>
                                 </div>
                             ) : (
                                 <div className="text-[10px] text-red-400 italic mb-2 pb-2 border-b border-white/5">
