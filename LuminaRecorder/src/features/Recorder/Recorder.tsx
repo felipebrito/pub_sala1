@@ -206,8 +206,8 @@ export function Recorder({ onNext, onBack, videoSource, warpState, setRecordedBl
                             grid={warpState.grid}
                             rows={warpState.rows}
                             cols={warpState.cols}
-                            width={width}
-                            height={height}
+                            width={Math.floor(width / 2) * 2}
+                            height={Math.floor(height / 2) * 2}
                         />
                     </div>
                 </div>

@@ -56,6 +56,7 @@ export function useVideoProcessor() {
         // Transcode to MP4 (High Quality)
         const args = [
             '-i', 'input.webm',
+            '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
             '-c:v', 'libx264',
             '-pix_fmt', 'yuv420p',
             '-preset', 'ultrafast',
