@@ -12,6 +12,9 @@ All notable changes to this project will be documented in this file.
     - **Metric**: UV coordinate visualization with 10% markers.
 - **Persistence**: Canvas/Total Resolution settings now persist to `localStorage`, preserving the 5006px width setup across reloads.
 - **Layout Presets UI**: Moved Layout Presets to the top of the sidebar for easier access.
+- **Lumina Recorder**: Added a standalone web application for creating distorted video loops.
+    - **Features**: Drag-and-drop loading, Bezier/Quad warp editor, Frame-perfect recording, and MP4/WebM export.
+    - **Tech**: React, Vite, Three.js, MediaRecorder, FFmpeg (WASM).
 - **Firmware Link**: Added a settings gear icon in the LED Bridge section linking to the firmware configuration page.
 
 ### Changed
