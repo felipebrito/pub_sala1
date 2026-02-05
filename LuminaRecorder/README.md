@@ -1,81 +1,81 @@
 # Lumina Recorder
 
-A specialized web application for creating frame-perfect, distorted video loops for projection mapping.
+Uma aplicação web especializada para criar loops de vídeo distorcidos e "frame-perfect" para projeção mapeada.
 
 ![Lumina Recorder](../media/recorder-ui.png)
 
-## Overview
+## Visão Geral
 
-Lumina Recorder is designed to solve the challenge of preparing content for physical projection surfaces (like curved walls or specific architectural features) without needing complex mapping software at playback time. It allows you to:
+O Lumina Recorder foi projetado para resolver o desafio de preparar conteúdo para superfícies de projeção físicas (como paredes curvas ou características arquitetônicas específicas) sem a necessidade de softwares de mapping complexos durante a reprodução. Ele permite que você:
 
-1.  **Load** a standard video loop.
-2.  **Warp** it using a Bezier/Quad grid to fit your physical surface.
-3.  **Record** the pre-distorted output as a new video file.
-4.  **Play** the resulting file on any standard media player (VLC, QuickTime, BrightSign, etc.) and it will perfectly align with your projection.
+1.  **Carregue** um loop de vídeo padrão.
+2.  **Distorça (Warp)** usando uma malha Bezier/Quad para ajustar à sua superfície física.
+3.  **Grave** a saída pré-distorcida como um novo arquivo de vídeo.
+4.  **Reproduza** o arquivo resultante em qualquer player de média padrão (VLC, QuickTime, BrightSign, etc.) e ele se alinhará perfeitamente com sua projeção.
 
-## Features
+## Funcionalidades
 
--   **Drag & Drop Loading**: Supports MP4, WebM, and MOV formats.
--   **Advanced Warp Engine**:
-    -   2x2 (Corner Pin), 3x3 (Bezier), or Custom Grid resolutions.
-    -   Real-time WebGL distortion using `three.js`.
-    -   Bicubic interpolation for smooth curves.
--   **Frame-Perfect Recording**:
-    -   Automatically synchronizes recording start/stop with video playback.
-    -   Captures exact duration to ensure seamless looping.
-    -   Records at 60 FPS (hardware dependent).
--   **Smart Conversion**:
-    -   Records raw high-quality streams (WebM/VP9).
-    -   **Auto-Converts to MP4 (H.264)** using in-browser FFmpeg (WASM) for maximum compatibility.
-    -   Falls back gracefully if hardware limits are reached.
+-   **Carregamento Drag & Drop**: Suporta formatos MP4, WebM e MOV.
+-   **Engine de Warping Avançada**:
+    -   Resoluções de Grid 2x2 (Corner Pin), 3x3 (Bezier) ou Customizadas.
+    -   Distorção WebGL em tempo real usando `three.js`.
+    -   Interpolação Bicúbica para curvas suaves.
+-   **Gravação Frame-Perfect**:
+    -   Sincroniza automaticamente o início/fim da gravação com a reprodução do vídeo.
+    -   Captura a duração exata para garantir loops contínuos (seamless).
+    -   Grava a 60 FPS (dependente de hardware).
+-   **Conversão Inteligente**:
+    -   Grava streams brutos de alta qualidade (WebM/VP9).
+    -   **Auto-Converte para MP4 (H.264)** usando FFmpeg no navegador (WASM) para máxima compatibilidade.
+    -   Fallback gracioso para WebM caso limites de memória sejam atingidos.
 
-## Tech Stack
+## Tecnologias
 
 -   **Framework**: React 19 + Vite
--   **Language**: TypeScript
--   **Graphics**: Three.js + React Three Fiber
--   **Styling**: TailwindCSS
--   **Video Processing**:
-    -   `MediaRecorder` API (Capture)
-    -   `@ffmpeg/ffmpeg` (WASM Conversion)
+-   **Linguagem**: TypeScript
+-   **Gráficos**: Three.js + React Three Fiber
+-   **Estilo**: TailwindCSS
+-   **Processamento de Vídeo**:
+    -   `MediaRecorder` API (Captura)
+    -   `@ffmpeg/ffmpeg` (Conversão WASM)
 
-## Getting Started
+## Começando
 
-### Prerequisites
+### Pré-requisitos
 
--   Node.js (v18 or higher)
+-   Node.js (v18 ou superior)
 -   npm
 
-### Installation
+### Instalação
 
-1.  Navigate to the project directory:
+1.  Navegue até o diretório do projeto:
     ```bash
     cd LuminaRecorder
     ```
-2.  Install dependencies:
+2.  Instale as dependências:
     ```bash
     npm install
     ```
 
-### Running Locally
+### Rodando Localmente
 
- Start the development server:
+ Inicie o servidor de desenvolvimento:
  ```bash
  npm run dev
  ```
- Open `http://localhost:5173` in your browser (Chrome is recommended for best `MediaRecorder` support).
+ Abra `http://localhost:5173` no seu navegador (Google Chrome é recomendado para melhor suporte ao `MediaRecorder`).
 
-### Building for Production
+### Build para Produção
 
-To create a static build:
+Para criar um build estático:
 ```bash
 npm run build
 ```
-The output will be in the `dist/` directory.
+Os arquivos gerados estarão na pasta `dist/`.
 
-## Workflow
+## Fluxo de Trabalho
 
-1.  **Load Video**: Drop your source video file.
-2.  **Adjust Distortion**: Use the grid points to map the video to your surface. Double-click points to reset them.
-3.  **Record**: Click "Start Recording". The app will play the video once and capture the output.
-4.  **Save**: Download the final `.mp4` file.
+1.  **Carregar Vídeo**: Arraste seu arquivo de vídeo fonte.
+2.  **Ajustar Distorção**: Use os pontos de controle para mapear o vídeo na superfície física. Clique duplo em um ponto para resetá-lo.
+3.  **Gravar**: Clique em "Start Recording". O app tocará o vídeo uma vez e capturará a saída automaticamente.
+4.  **Salvar**: Baixe o arquivo `.mp4` final.
