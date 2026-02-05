@@ -5,6 +5,7 @@ import { TEST_VIDEOS } from './constants/videos';
 import { Play, Pause, Grid3X3, MousePointer2, ExternalLink, RotateCcw, Plus, Minus, ChevronDown } from 'lucide-react'
 import { io } from 'socket.io-client';
 import FirmwareUpload from './components/FirmwareUpload';
+import { TestPatterns } from './components/TestPatterns';
 
 
 
@@ -400,6 +401,21 @@ export default function App() {
     const [selectedProjector, setSelectedProjector] = useState(0);
     const [selectedPoints, setSelectedPoints] = useState<{ r: number, c: number }[]>([]);
 
+    // Canvas / Total Resolution
+    const [totalResolution, setTotalResolution] = useState(() => {
+        try {
+            const saved = localStorage.getItem('lumina-resolution');
+            if (saved) return JSON.parse(saved);
+        } catch (e) {
+            console.error(e);
+        }
+        return { width: 1920, height: 1080 };
+    });
+
+    useEffect(() => {
+        localStorage.setItem('lumina-resolution', JSON.stringify(totalResolution));
+    }, [totalResolution]);
+
     // Masking State
     const [activeTool, setActiveTool] = useState<'move' | 'mask'>('move');
     const [drawingMask, setDrawingMask] = useState<Point[]>([]);
@@ -418,6 +434,7 @@ export default function App() {
     const [ledPreviewData, setLedPreviewData] = useState<Uint8Array | null>(null);
     const [collapsedSections, setCollapsedSections] = useState<string[]>([]);
     const [isLedFlipped, setIsLedFlipped] = useState(false);
+    const [activePattern, setActivePattern] = useState(0); // 0 = Video
 
     // Undo History
     const [history, setHistory] = useState<ProjectorConfig[][]>([]);
@@ -469,6 +486,51 @@ export default function App() {
             rendererRef.current.updateGridWarp(selectedProjector, defaultGrid, rows, cols, 'linear');
         }
         setSelectedPoints([]);
+    };
+
+    const applyLayoutPreset = (type: 'DEFAULT' | 'PUC_SALA_1') => {
+        // if (!confirm('This will overwrite current Crop and Overlap settings. Continue?')) return;
+        pushHistory();
+
+        setProjectors(prev => {
+            const next = prev.map(p => ({ ...p })); // Clone
+
+            if (type === 'DEFAULT') {
+                setTotalResolution({ width: 5760, height: 1080 });
+                // 3x1 Simple Split
+                next.forEach((p, i) => {
+                    p.crop = { x: i * (1 / 3), y: 0, width: 1 / 3, height: 1 };
+                    p.edgeBlend = { left: 0, right: 0, top: 0, bottom: 0, gamma: 1.0 };
+                });
+            } else if (type === 'PUC_SALA_1') {
+                const TOTAL_W = 5006;
+                setTotalResolution({ width: 5006, height: 1080 });
+
+                const PROJ_W = 1920;
+                const OVERLAP = 377; // 377 pixels
+
+                // Projector 1: Starts at 0
+                next[0].crop = { x: 0, y: 0, width: PROJ_W / TOTAL_W, height: 1 };
+                // Blend Right only
+                next[0].edgeBlend = { ...next[0].edgeBlend, right: (OVERLAP / PROJ_W), left: 0 };
+
+                // Projector 2: Starts at 1920 - 377 = 1543
+                const p2Start = 1543;
+                next[1].crop = { x: p2Start / TOTAL_W, y: 0, width: PROJ_W / TOTAL_W, height: 1 };
+                // Blend Both
+                next[1].edgeBlend = { ...next[1].edgeBlend, left: (OVERLAP / PROJ_W), right: (OVERLAP / PROJ_W) }; // normalized to Projector Width (0..1)
+
+                // Projector 3: Starts at 3463 - 377 = 3086 (Check: 3086 + 1920 = 5006. OK.)
+                const p3Start = 3086;
+                next[2].crop = { x: p3Start / TOTAL_W, y: 0, width: PROJ_W / TOTAL_W, height: 1 };
+                // Blend Left only
+                next[2].edgeBlend = { ...next[2].edgeBlend, left: (OVERLAP / PROJ_W), right: 0 };
+
+            }
+
+            localStorage.setItem('lumina-config-v4', JSON.stringify(next));
+            return next;
+        });
     };
 
     const toggleSection = (id: string) => {
@@ -537,7 +599,7 @@ export default function App() {
         };
     }, []);
 
-    // 4. Update Renderer on Config Change (Crop/Warp)
+    // 4. Update Renderer on Config Change (Crop/Warp) & Pattern
     // This effect now ONLY handles non-drag updates (initial load, undo, reset, crop sliders)
     useEffect(() => {
         if (!rendererRef.current) return;
@@ -546,7 +608,10 @@ export default function App() {
             if (proj.edgeBlend) rendererRef.current?.updateEdgeBlend(i, proj.edgeBlend);
             rendererRef.current?.updateGridWarp(i, proj.grid, proj.rows, proj.cols, proj.mode);
         });
-    }, [projectors]);
+        // Update Pattern GLOBAL for all projectors for now
+        const customUrl = activePattern === 5 ? '/pattern/pattern-5006x1080.png' : undefined;
+        rendererRef.current.setPattern(activePattern, customUrl);
+    }, [projectors, activePattern]);
 
     // Crossfade Logic
     const fadeTo = (target: 'IDLE' | 'MAIN') => {
@@ -1079,6 +1144,27 @@ export default function App() {
 
                 <div className="h-px bg-white/5 mx-2" />
 
+                {/* Layout Presets (Moved to Top) */}
+                <div className="p-3 bg-white/5 rounded border border-white/5 space-y-2">
+                    <h2 className="text-xs font-bold text-slate-500 uppercase">Layout Presets</h2>
+                    <div className="grid grid-cols-2 gap-2">
+                        <button
+                            onClick={() => applyLayoutPreset('DEFAULT')}
+                            className="text-[10px] bg-slate-800 hover:bg-slate-700 py-2 rounded text-slate-300"
+                        >
+                            3x1 Standard
+                        </button>
+                        <button
+                            onClick={() => applyLayoutPreset('PUC_SALA_1')}
+                            className="text-[10px] font-bold bg-amber-500/20 hover:bg-amber-500/40 border border-amber-500/50 py-2 rounded text-amber-500 active:scale-95 transition-all"
+                        >
+                            PUC Sala 1 (5006px)
+                        </button>
+                    </div>
+                </div>
+
+                <div className="h-px bg-white/5 mx-2" />
+
                 {/* LED Bridge Section - Collapsible */}
                 <div className="space-y-2">
                     <button
@@ -1249,20 +1335,64 @@ export default function App() {
 
                     {!collapsedSections.includes('input') && (
                         <div className="space-y-3 bg-white/5 rounded-lg p-3 border border-white/5 animate-in fade-in slide-in-from-top-2 duration-300">
-                            {['x', 'width', 'y', 'height'].map(field => (
-                                <div key={field}>
-                                    <div className="flex justify-between text-[9px] mb-1 uppercase font-bold">
-                                        <span className="text-slate-500">{field}</span>
-                                        <span className="text-amber-500/80">{Math.round(projectors[selectedProjector].crop[field as keyof Crop] * 100)}%</span>
-                                    </div>
+                            {/* Canvas Size Reference */}
+                            <div className="flex gap-2 mb-2 p-2 bg-black/20 rounded border border-white/5">
+                                <div className="space-y-1 flex-1">
+                                    <label className="text-[9px] text-slate-500 uppercase font-bold">Total Width</label>
                                     <input
-                                        type="range" min={field.includes('width') || field.includes('height') ? 0.01 : 0} max="1" step="0.001"
-                                        value={projectors[selectedProjector].crop[field as keyof Crop]}
-                                        onChange={(e) => updateCrop(field as keyof Crop, parseFloat(e.target.value))}
-                                        className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                                        type="number"
+                                        value={totalResolution.width}
+                                        onChange={(e) => setTotalResolution(prev => ({ ...prev, width: parseInt(e.target.value) || 1920 }))}
+                                        className="w-full bg-slate-800 text-white px-1 py-0.5 rounded text-[10px] border border-slate-700"
                                     />
                                 </div>
-                            ))}
+                                <div className="space-y-1 flex-1">
+                                    <label className="text-[9px] text-slate-500 uppercase font-bold">Total Height</label>
+                                    <input
+                                        type="number"
+                                        value={totalResolution.height}
+                                        onChange={(e) => setTotalResolution(prev => ({ ...prev, height: parseInt(e.target.value) || 1080 }))}
+                                        className="w-full bg-slate-800 text-white px-1 py-0.5 rounded text-[10px] border border-slate-700"
+                                    />
+                                </div>
+                            </div>
+
+                            {['x', 'width', 'y', 'height'].map(field => {
+                                const isX = field === 'x' || field === 'width';
+                                const totalBase = isX ? totalResolution.width : totalResolution.height;
+                                const currentVal = projectors[selectedProjector].crop[field as keyof Crop];
+                                const pixelVal = Math.round(currentVal * totalBase);
+
+                                return (
+                                    <div key={field}>
+                                        <div className="flex justify-between text-[9px] mb-1 uppercase font-bold">
+                                            <span className="text-slate-500">{field}</span>
+                                            <div className="flex gap-2">
+                                                <span className="text-slate-400">{Math.round(currentVal * 100)}%</span>
+                                                <span className="text-amber-500">{pixelVal}px</span>
+                                            </div>
+                                        </div>
+                                        {/* Pixel Input */}
+                                        <div className="flex gap-2 items-center mb-1">
+                                            <input
+                                                type="number"
+                                                value={pixelVal}
+                                                onChange={(e) => {
+                                                    const px = parseFloat(e.target.value) || 0;
+                                                    updateCrop(field as keyof Crop, px / totalBase);
+                                                }}
+                                                className="flex-1 bg-slate-800 text-amber-500 font-mono px-1 py-0.5 rounded text-[10px] border border-slate-700 focus:border-amber-500 outline-none"
+                                            />
+                                        </div>
+                                        <input
+                                            type="range" min={field.includes('width') || field.includes('height') ? 0.01 : 0} max="1" step="0.0001"
+                                            value={currentVal}
+                                            onChange={(e) => updateCrop(field as keyof Crop, parseFloat(e.target.value))}
+                                            className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                                        />
+                                    </div>
+                                );
+                            })}
 
                             <div className="flex gap-4 pt-2 border-t border-white/5">
                                 {['flipH', 'flipV'].map(f => (
@@ -1384,6 +1514,10 @@ export default function App() {
                         Force Return to Idle
                     </button>
                 </div>
+
+                {/* Test Patterns */}
+                <TestPatterns activePattern={activePattern} onChange={setActivePattern} />
+
 
                 {/* Playlist Control */}
                 <div className="p-3 bg-white/5 rounded border border-white/5 space-y-4">

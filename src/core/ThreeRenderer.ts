@@ -38,6 +38,10 @@ export class ThreeRenderer {
     private videoA: HTMLVideoElement | null = null;
     private videoB: HTMLVideoElement | null = null;
 
+    // Pattern Assets
+    private patternTexture: THREE.Texture | null = null;
+    private textureLoader: THREE.TextureLoader = new THREE.TextureLoader();
+
     // Internal sampling assets
     private samplingCanvas: HTMLCanvasElement;
     private samplingCtx: CanvasRenderingContext2D | null;
@@ -146,6 +150,36 @@ export class ThreeRenderer {
             if (mesh) {
                 const material = mesh.material as EdgeBlendMaterial;
                 material.mixVideo = mix;
+                material.needsUpdate = true;
+            }
+        });
+    }
+
+    public setPattern(mode: number, textureUrl?: string) {
+        // If Custom Mode (5) and URL provided
+        if (mode === 5 && textureUrl) {
+            this.textureLoader.load(textureUrl, (tex) => {
+                tex.colorSpace = THREE.SRGBColorSpace;
+                tex.minFilter = THREE.LinearFilter;
+                tex.magFilter = THREE.LinearFilter;
+                this.patternTexture = tex;
+
+                this.meshes.forEach(mesh => {
+                    if (mesh) {
+                        const material = mesh.material as EdgeBlendMaterial;
+                        material.patternTexture = tex;
+                        material.patternMode = mode;
+                        material.needsUpdate = true;
+                    }
+                });
+            });
+            return;
+        }
+
+        this.meshes.forEach(mesh => {
+            if (mesh) {
+                const material = mesh.material as EdgeBlendMaterial;
+                material.patternMode = mode;
                 material.needsUpdate = true;
             }
         });

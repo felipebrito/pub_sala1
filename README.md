@@ -81,11 +81,16 @@ Um serviço Node.js independente que atua como middleware entre o navegador e o 
 - [x] **Assistente de Firmware**: Upload de binário para ESP32 via WebSerial/Esptool backend.
 - [x] **Verificação de Hardware**: Feedback visual (LEDs piscam) após gravação.
 
-### 🚧 Planejado / Em Breve
-- [ ] **Edge Blending**: Máscara de gradiente suave para projetores sobrepostos.
-- [ ] **Grid Personalizado**: Controles manuais de densidade N x N.
-- [ ] **Gerenciamento de Presets**: Exportar/Importar configurações em JSON.
-- [ ] **Máscaras**: Ferramenta de desenho (Pen Tool) para ocultar áreas indesejadas.
+### 🚧 Roadmap (Prioridade Atual)
+- [ ] **Ferramentas de Mapeamento**:
+    - [ ] **Padrões de Teste**: Grid de Alinhamento, Barras de Cor, Foco e UV Map.
+    - [ ] **Crop & Mask**:
+        - [ ] Ferramenta de Crop de Entrada (Input Slicing) aprimorada visualmente.
+        - [ ] Sistema de Máscaras (Masking) vetorial para ocultar áreas indesejadas.
+- [ ] **Edge Blending**: 
+    - [ ] Interface visual para controle de Gamma e Largura do blend.
+- [ ] **Grid Personalizado**: Subdivisão dinâmica da malha (subdivide & collapse).
+- [ ] **Gerenciamento de Presets**: Salvar/Carregar mapas completos.
 
 ## Licença
 
