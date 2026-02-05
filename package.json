@@ -9,7 +9,7 @@
         "preview": "vite preview",
         "osc": "node server/osc-bridge.js",
         "bridge": "node bridge/index.js",
-        "start": "concurrently \"npm run dev\" \"npm run bridge\""
+        "start": "concurrently \"npm run dev\" \"npm run bridge\" \"npm run osc\""
     },
     "dependencies": {
         "@types/three": "^0.182.0",
@@ -19,6 +19,7 @@
         "node-osc": "^11.2.2",
         "react": "^18.2.0",
         "react-dom": "^18.2.0",
+        "serialport": "^13.0.0",
         "socket.io": "^4.8.3",
         "socket.io-client": "^4.8.3",
         "tailwind-merge": "^2.2.1",

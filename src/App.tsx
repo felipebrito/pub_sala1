@@ -4,6 +4,10 @@ import { useLedBridge } from './hooks/useLedBridge'
 import { TEST_VIDEOS } from './constants/videos';
 import { Play, Pause, Grid3X3, MousePointer2, ExternalLink, RotateCcw, Plus, Minus, ChevronDown } from 'lucide-react'
 import { io } from 'socket.io-client';
+import FirmwareUpload from './components/FirmwareUpload';
+
+
+
 
 // Types
 interface Point { x: number; y: number }
@@ -350,8 +354,11 @@ const OutputWindow = ({ index }: { index: number }) => {
                 OUTPUT {index + 1} {aspectLock && '[16:9 LOCKED]'}
             </div>
 
+
+
             {!isFs && (
                 <button
+
                     onClick={(e) => {
                         e.stopPropagation();
                         containerRef.current?.requestFullscreen();
@@ -374,6 +381,10 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const outIdx = params.get('output');
     if (outIdx !== null) return <OutputWindow index={parseInt(outIdx)} />;
+
+    // Check for Firmware Upload Page
+    if (params.get('page') === 'firmware') return <FirmwareUpload />;
+
     // --- State ---
     const loadConfig = (): ProjectorConfig[] => {
         try {
@@ -408,6 +419,58 @@ export default function App() {
     const [collapsedSections, setCollapsedSections] = useState<string[]>([]);
     const [isLedFlipped, setIsLedFlipped] = useState(false);
 
+    // Undo History
+    const [history, setHistory] = useState<ProjectorConfig[][]>([]);
+
+    const pushHistory = useCallback(() => {
+        setHistory(prev => {
+            const snapshot = JSON.parse(JSON.stringify(projectors));
+            return [snapshot, ...prev].slice(0, 50); // limit 50 steps
+        });
+    }, [projectors]);
+
+    const undo = useCallback(() => {
+        setHistory(prev => {
+            if (prev.length === 0) return prev;
+            const [last, ...remaining] = prev;
+            setProjectors(last);
+
+            // Update renderer for all
+            last.forEach((proj, i) => {
+                rendererRef.current?.updateGridWarp(i, proj.grid, proj.rows, proj.cols, proj.mode);
+                rendererRef.current?.updateInputCrop(i, proj.crop);
+                rendererRef.current?.updateEdgeBlend(i, proj.edgeBlend);
+            });
+
+            localStorage.setItem('lumina-config-v4', JSON.stringify(last));
+            return remaining;
+        });
+    }, []);
+
+    const fullReset = () => {
+        pushHistory();
+        const rows = 2, cols = 2;
+        const defaultGrid = createDefaultGrid(rows, cols);
+
+        setProjectors(prev => {
+            const next = [...prev];
+            next[selectedProjector] = {
+                ...next[selectedProjector],
+                rows,
+                cols,
+                grid: defaultGrid,
+                mode: 'linear'
+            };
+            localStorage.setItem('lumina-config-v4', JSON.stringify(next));
+            return next;
+        });
+
+        if (rendererRef.current) {
+            rendererRef.current.updateGridWarp(selectedProjector, defaultGrid, rows, cols, 'linear');
+        }
+        setSelectedPoints([]);
+    };
+
     const toggleSection = (id: string) => {
         setCollapsedSections(prev =>
             prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]
@@ -415,7 +478,31 @@ export default function App() {
     };
 
     // LED Bridge
-    const { isConnected: isLedBridgeConnected, sendData: sendLedData } = useLedBridge();
+    const { isConnected: isLedBridgeConnected, sendData: sendLedData, sendJson, lastMessage } = useLedBridge();
+    const [ports, setPorts] = useState<{ path: string, manufacturer?: string }[]>([]);
+    const [selectedPort, setSelectedPort] = useState('');
+
+    useEffect(() => {
+        if (isLedBridgeConnected) {
+            // Request ports on connect
+            sendJson({ type: 'GET_PORTS' });
+        }
+    }, [isLedBridgeConnected, sendJson]);
+
+    useEffect(() => {
+        if (lastMessage && lastMessage.type === 'PORTS_LIST') {
+            setPorts(lastMessage.ports);
+        }
+        if (lastMessage && lastMessage.type === 'PORT_SET') {
+            setSelectedPort(lastMessage.port);
+        }
+    }, [lastMessage]);
+
+    const handlePortChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const port = e.target.value;
+        setSelectedPort(port);
+        sendJson({ type: 'SET_PORT', port });
+    };
 
     // Refs
     const rendererRef = useRef<ThreeRenderer | null>(null);
@@ -503,9 +590,14 @@ export default function App() {
         requestAnimationFrame(animate);
     };
 
-    // Keyboard Shortcuts for Trigger & Precision Move
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
+            // Undo Shortcut
+            if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+                e.preventDefault();
+                undo();
+            }
+
             // Space or 'T' to trigger Main
             if ((e.code === 'Space' || e.key.toLowerCase() === 't') && playbackState === 'IDLE') {
                 console.log("Triggering Main Content");
@@ -520,6 +612,7 @@ export default function App() {
             // Arrow keys for precision move
             if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && selectedPoints.length > 0) {
                 e.preventDefault();
+                pushHistory();
                 const step = e.shiftKey ? 5 : 1;
                 let dx = 0, dy = 0;
                 if (e.key === 'ArrowUp') dy = -step;
@@ -540,7 +633,7 @@ export default function App() {
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [playbackState, selectedPoints, selectedProjector]);
+    }, [playbackState, selectedPoints, selectedProjector, undo, pushHistory]);
 
     // OSC Command Listener
     useEffect(() => {
@@ -737,6 +830,7 @@ export default function App() {
     };
 
     const setMode = (mode: 'linear' | 'bicubic') => {
+        pushHistory();
         updateProjector(selectedProjector, prev => {
             let newRows = prev.rows;
             let newCols = prev.cols;
@@ -765,6 +859,7 @@ export default function App() {
     };
 
     const changeGridResolution = (dRows: number, dCols: number) => {
+        pushHistory();
         updateProjector(selectedProjector, prev => {
             const newRows = Math.max(2, prev.rows + dRows);
             const newCols = Math.max(2, prev.cols + dCols);
@@ -783,6 +878,7 @@ export default function App() {
     };
 
     const updateCrop = (field: keyof Crop, value: number) => {
+        pushHistory();
         updateProjector(selectedProjector, prev => ({
             ...prev,
             crop: { ...prev.crop, [field]: value }
@@ -791,6 +887,7 @@ export default function App() {
 
     const handleDragStart = (projIdx: number, rStart: number, cStart: number, e: React.MouseEvent) => {
         e.preventDefault();
+        pushHistory();
 
         // Update selection if not clicking on already selected point
         const isSelected = selectedPoints.some(p => p.r === rStart && p.c === cStart);
@@ -878,6 +975,7 @@ export default function App() {
     };
 
     const resetPoint = (r: number, c: number) => {
+        pushHistory();
         updateProjector(selectedProjector, active => {
             const newGrid = active.grid.map(row => row.map(p => ({ ...p })));
             const defaultX = (c / (active.cols - 1)) * 360;
@@ -988,7 +1086,7 @@ export default function App() {
                         className="w-full flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase tracking-widest hover:text-white transition-colors py-1 group"
                     >
                         <div className="flex items-center gap-2">
-                            <div className={`w-1.5 h-1.5 rounded-full ${isLedBridgeConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                            <span className={`w-1.5 h-1.5 rounded-full ${isLedBridgeConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
                             LED Bridge
                         </div>
                         <ChevronDown size={12} className={`transition-transform duration-300 ${collapsedSections.includes('led') ? '-rotate-90' : ''}`} />
@@ -996,6 +1094,35 @@ export default function App() {
 
                     {!collapsedSections.includes('led') && (
                         <div className="space-y-3 py-3 bg-white/5 rounded-lg p-3 border border-white/5 animate-in fade-in slide-in-from-top-2 duration-300">
+                            {/* Port Selection Integration */}
+                            {isLedBridgeConnected ? (
+                                <div className="flex gap-2 mb-2 pb-2 border-b border-white/5">
+                                    <select
+                                        value={selectedPort}
+                                        onChange={handlePortChange}
+                                        className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-[10px] outline-none hover:border-white/30 transition-colors"
+                                    >
+                                        <option value="" disabled>Select Serial Port</option>
+                                        {ports.map(p => (
+                                            <option key={p.path} value={p.path}>
+                                                {p.path} {p.manufacturer ? `(${p.manufacturer})` : ''}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <button
+                                        onClick={() => sendJson({ type: 'GET_PORTS' })}
+                                        className="p-1.5 bg-white/5 hover:bg-white/10 rounded border border-white/5 text-white/50 hover:text-white"
+                                        title="Refresh Ports"
+                                    >
+                                        <RotateCcw size={10} />
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="text-[10px] text-red-400 italic mb-2 pb-2 border-b border-white/5">
+                                    Bridge Disconnected
+                                </div>
+                            )}
+
                             <div className="flex items-center justify-between">
                                 <span className="text-[9px] font-bold text-white/20 uppercase">Streaming</span>
                                 <button
@@ -1088,6 +1215,23 @@ export default function App() {
                                         <button onClick={() => changeGridResolution(0, 1)} className="p-1 hover:bg-white/10 rounded-full text-amber-500"><Plus size={12} /></button>
                                     </div>
                                 </div>
+                            </div>
+
+                            <div className="flex gap-2 pt-2 border-t border-white/5">
+                                <button
+                                    onClick={undo}
+                                    disabled={history.length === 0}
+                                    className={`flex-1 py-1.5 text-[9px] uppercase font-bold rounded-lg flex items-center justify-center gap-1 border border-white/5 transition-all
+                                        ${history.length > 0 ? 'bg-white/5 text-white hover:bg-white/10 active:scale-95' : 'text-white/20 cursor-not-allowed opacity-50'}`}
+                                >
+                                    <RotateCcw size={10} className="-scale-x-100" /> Undo
+                                </button>
+                                <button
+                                    onClick={fullReset}
+                                    className="px-3 py-1.5 text-[9px] uppercase font-bold rounded-lg text-red-400 hover:text-white hover:bg-red-600/20 border border-white/5 transition-all active:scale-95"
+                                >
+                                    Full Reset
+                                </button>
                             </div>
                         </div>
                     )}

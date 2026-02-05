@@ -8,7 +8,7 @@ export const CONFIG = {
     PORT: 6454,
 
     // WebSocket configuration
-    WS_PORT: 8080,
+    WS_PORT: 3002,
 
     // Universe mapping
     // Universe 0: pixels 1-170 (510 channels)

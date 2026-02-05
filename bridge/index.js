@@ -1,9 +1,13 @@
-import { CONFIG } from './config.js';
-import { ArtnetSender } from './artnetSender.js';
+import { SerialSender } from './serialSender.js';
 import { FrameGenerator } from './frameGenerator.js';
+import { CONFIG } from './config.js';
 import { WebSocketServer } from 'ws';
 
-const sender = new ArtnetSender(CONFIG.TARGET_IP, CONFIG.PORT);
+import { SerialPort } from 'serialport';
+
+// Force null to wait for user selection
+const SERIAL_PORT = null; // process.env.SERIAL_PORT || null;
+const sender = new SerialSender(SERIAL_PORT, 115200);
 const generator = new FrameGenerator(CONFIG.PIXEL_COUNT);
 
 // WebSocket Server
@@ -14,11 +18,38 @@ let lastWsTime = 0;
 wss.on('connection', (ws) => {
     console.log(`\n[WS] Client connected. Total clients: ${wss.clients.size}`);
 
-    ws.on('message', (data) => {
+    // Auto-send ports
+    SerialPort.list().then(ports => {
+        ws.send(JSON.stringify({ type: 'PORTS_LIST', ports }));
+    }).catch(err => console.error('[Bridge] Error listing ports:', err));
+
+    ws.on('message', async (data) => {
         // Expecting binary data (Uint8Array of 540 bytes)
         if (data instanceof Buffer || data instanceof Uint8Array) {
             lastWsData = new Uint8Array(data);
             lastWsTime = Date.now();
+        } else {
+            // Handle Command Messages (JSON)
+            try {
+                const msg = JSON.parse(data);
+                if (msg.type === 'GET_PORTS') {
+                    // Send list of ports
+                    console.log('[Bridge] Requesting ports list...');
+                    const ports = await SerialPort.list();
+                    console.log(`[Bridge] Found ${ports.length} ports.`);
+                    ws.send(JSON.stringify({ type: 'PORTS_LIST', ports }));
+                }
+                if (msg.type === 'SET_PORT') {
+                    console.log(`[Bridge] Switching to port: ${msg.port}`);
+                    sender.close();
+                    sender.portPath = msg.port;
+                    sender.connect();
+                    // Confirm back
+                    ws.send(JSON.stringify({ type: 'PORT_SET', port: msg.port }));
+                }
+            } catch (e) {
+                // Ignore non-json or binary
+            }
         }
     });
 
@@ -29,7 +60,7 @@ wss.on('connection', (ws) => {
 
 let frameCount = 0;
 let lastLogTime = Date.now();
-let currentPattern = 'gradient'; // gradient, corner, chase
+// let currentPattern = 'gradient';
 
 /**
  * Main Loop
@@ -44,48 +75,38 @@ function tick() {
     if (lastWsData && (now - lastWsTime < dataTimeout)) {
         pixelData = lastWsData;
     } else {
-        // Fallback to patterns
-        if (currentPattern === 'gradient') {
-            pixelData = generator.createGradient();
-        } else if (currentPattern === 'corner') {
-            pixelData = generator.createCornerTest();
-        } else {
-            pixelData = generator.createChase();
-        }
+        // IDLE: Send Black (0)
+        pixelData = new Uint8Array(CONFIG.PIXEL_COUNT * 3).fill(0);
     }
 
-    // 2. Split into universes
-    // Universe 0: 170 pixels (510 channels)
-    const u0Data = pixelData.slice(0, 510);
-    // Universe 1: 10 pixels (30 channels)
-    const u1Data = pixelData.slice(510, 540);
+    // 3. Send via Serial (Adalight)
+    // Flatten universes or just send raw pixel data directly if it fits in one go
+    // For Adalight with ESP, we typically send the whole buffer at once if receiving side supports it.
+    // Our ESP firmware supports varying lengths, up to NUM_LEDS.
 
-    // 3. Send via Art-Net
-    sender.send(0, u0Data);
-    sender.send(1, u1Data);
+    // Combine if splitting was only for ArtNet universe limits
+    // Adalight limit is usually high (limited by baudrate/fps)
+    sender.send(pixelData);
 
     frameCount++;
-
-    // 4. Pattern switching logic (demo purposes)
-    if (now % 15000 < 5000) currentPattern = 'corner';
-    else if (now % 15000 < 10000) currentPattern = 'gradient';
-    else currentPattern = 'chase';
 
     // 5. Logging
     if (now - lastLogTime >= 1000) {
         const fps = frameCount;
-        const source = (lastWsData && (now - lastWsTime < dataTimeout)) ? 'WS' : 'Ptr';
-        process.stdout.write(`\r[Lumina Bridge] FPS: ${fps} | Src: ${source} | Pattern: ${currentPattern} | U0: ${u0Data.length}b | U1: ${u1Data.length}b   `);
+        const hasSource = (lastWsData && (now - lastWsTime < dataTimeout));
+        const source = hasSource ? 'WS' : 'Idle';
+        const status = hasSource ? 'Streaming' : 'Black';
+        process.stdout.write(`\r[Lumina Bridge] FPS: ${fps} | Src: ${source} | Status: ${status} | Bytes: ${pixelData.length}   `);
         frameCount = 0;
         lastLogTime = now;
     }
 }
 
 console.log('--- Lumina Mapper Bridge (Milestone 1) ---');
-console.log(`Target: ${CONFIG.TARGET_IP}:${CONFIG.PORT}`);
+console.log(`Serial Port: ${SERIAL_PORT}`);
 console.log(`WebSocket: ws://localhost:${CONFIG.WS_PORT}`);
 console.log(`Pixels: ${CONFIG.PIXEL_COUNT} (180)`);
-console.log(`Universes: 0 (510 ch), 1 (30 ch)`);
+console.log(`Protocol: Adalight (Serial)`);
 console.log('------------------------------------------');
 
 setInterval(tick, CONFIG.TICK_INTERVAL);

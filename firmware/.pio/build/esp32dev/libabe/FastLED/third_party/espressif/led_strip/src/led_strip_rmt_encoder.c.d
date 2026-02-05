@@ -1,0 +1,26 @@
+.pio/build/esp32dev/libabe/FastLED/third_party/espressif/led_strip/src/led_strip_rmt_encoder.c.o: \
+ .pio/libdeps/esp32dev/FastLED/src/third_party/espressif/led_strip/src/led_strip_rmt_encoder.c \
+ .pio/libdeps/esp32dev/FastLED/src/third_party/espressif/led_strip/src/enabled.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/dio_qspi/include/sdkconfig.h \
+ .pio/libdeps/esp32dev/FastLED/src/platforms/esp/esp_version.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/has_include.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/esp_common/include/esp_idf_version.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/unused.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/esp_common/include/esp_check.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/esp_common/include/esp_err.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/esp_common/include/esp_compiler.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/log/include/esp_log.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/esp_rom/include/esp_rom_sys.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/soc/esp32/include/soc/reset_reasons.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/log/include/esp_log_internal.h \
+ .pio/libdeps/esp32dev/FastLED/src/third_party/espressif/led_strip/src/led_strip_rmt_encoder.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/stdint.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/esp_driver_rmt/include/driver/rmt_encoder.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/hal/include/hal/rmt_types.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/soc/esp32/include/soc/clk_tree_defs.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/soc/esp32/include/soc/soc_caps.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/esp_driver_rmt/include/driver/rmt_types.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/hal/include/hal/gpio_types.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/soc/esp32/include/soc/gpio_num.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/esp_common/include/esp_bit_defs.h \
+ .pio/libdeps/esp32dev/FastLED/src/third_party/espressif/led_strip/src/led_strip_types.h

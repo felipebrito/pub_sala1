@@ -1,89 +1,92 @@
 # Lumina Mapper
 
-**Web-based Video Mapping Software** built with React, Three.js, and Vite.
-Simulates a professional projection mapping workflow directly in the browser.
+**Software de Video Mapping Web** construído com React, Three.js e Vite.
+Simula um fluxo de trabalho profissional de projeção mapeada diretamente pelo navegador.
 
 ![Lumina Mapper](https://github.com/user-attachments/assets/placeholder.png)
 
-## Features
+## Funcionalidades
 
-- **Multi-Projector Support**: Controls 3 independent projector outputs (Virtual Canvas).
-- **Advanced Warping**: 
-  - Quad-corner pinning for keystone correction.
-  - **High-Density Mesh Interpolation (32x32)**: Uses bicubic mathematical interpolation to prevent texture distortion (zig-zag artifacts) during heavy warping.
-- **Input Mapping (Slicing)**: 
-  - Dynamic input cropping per projector.
-  - Select specific regions of a source video (e.g., Left 1/3, Center 1/3) for each output.
-  - Adjustable X, Y, Width, and Height sliders.
-- **Video Reference**:
-  - Background "Ghost Video" reference (Optional) or clean output mode.
-  - Optimized VideoTexture handling via Three.js.
-  - Auto-play and loop management.
-- **LED Bridge (Art-Net)**:
-  - Real-time 1D Pixel Sampling from the WebGL canvas.
-  - Art-Net (DMX) output over UDP (Broadcast).
-  - Standalone Node.js bridge for hardware integration (ESP32/WLED/Resolume).
+- **Suporte Multi-Projetor**: Controla 3 saídas independentes de projetores (Outputs Virtuais / Canvas).
+- **Warping Avançado (Distorção)**: 
+  - Ajuste de cantos (Keystone) para correção de perspectiva.
+  - **Interpolação de Malha de Alta Densidade (32x32)**: Utiliza matemática bicúbica para evitar distorção de textura (zig-zag / serrilhado) durante ajustes extremos.
+- **Mapeamento de Entrada (Slicing)**: 
+  - Recorte dinâmico da entrada de vídeo para cada projetor.
+  - Selecione regiões específicas do vídeo fonte (ex: 1/3 Esquerdo, 1/3 Central) para cada saída.
+  - Controles ajustáveis de X, Y, Largura e Altura.
+- **Referência de Vídeo**:
+  - Vídeo de fundo "Ghost" para referência (Opcional) ou modo de saída limpa.
+  - Manipulação otimizada de `VideoTexture` via Three.js.
+  - Gerenciamento automático de loop e autoplay.
+- **Ponte LED (Serial / Adalight)**:
+  - **Amostragem em Tempo Real**: Captura cores de uma linha do vídeo (1px height) diretamente do Canvas WebGL.
+  - **Integração de Hardware**: Envia dados via Serial ( USB) para controladores ESP32 rodando firmware Adalight.
+  - **Assistente de Firmware**: Interface integrada para gravar/flashear a ESP32 direto do navegador.
 
-## Technology Stack
+## Tecnologias Utilizadas
 
 - **Frontend**: React 18 + TypeScript + Vite + Three.js
-- **Bridge**: Node.js + `dgram` (UDP) + `ws` (WebSockets)
-- **Protocols**: Art-Net (ArtDMX), WebSocket (Binary)
+- **Bridge (Ponte)**: Node.js + `serialport` + `ws` (WebSockets) + `socket.io`
+- **Protocolos**: Adalight (Serial), WebSocket (Binário), Socket.IO (Controle)
 
-## Architecture
+## Arquitetura
 
 ### `ThreeRenderer.ts`
-The core rendering engine. Replaces standard DOM manipulation with a WebGL context.
-- Manages 3 parallel Three.js `Scenes` and `Renderers`.
-- Implements `VideoTexture` streaming.
-- **Warping Logic**: Directly manipulates the vertex positions of a high-density 32x32 `PlaneGeometry`. Uses `WarpMath.ts` to calculate smooth curves between control points.
-- **Input Mapping**: Manipulates UV coordinates of the mesh to "slice" the video texture.
-- **Pixel Sampling**: Captures RGB data from the canvas at 30 FPS for LED synchronization.
+O motor central de renderização. Substitui a manipulação DOM padrão por um contexto WebGL de alta performance.
+- Gerencia 3 `Scenes` e `Renderers` Three.js paralelos.
+- Implementa streaming de `VideoTexture`.
+- **Lógica de Warping**: Manipula diretamente as posições dos vértices de uma `PlaneGeometry` de alta densidade (32x32). Usa `WarpMath.ts` para calcular curvas suaves entre os pontos de controle.
+- **Mapeamento de Entrada**: Manipula coordenadas UV da malha para "fatiar" a textura do vídeo.
+- **Amostragem de Pixel**: Captura dados RGB do canvas a 30-60 FPS para sincronização com os LEDs.
 
-### LED Bridge (`/bridge`)
-A standalone Node.js service that acts as a middleware between the browser and the LED hardware.
-- **WebSocket Server**: Receives binary pixel data from the browser.
-- **Art-Net Sender**: Packs data into ArtDMX packets and broadcasts them to the network (Port 6454).
-- **Fallback Generator**: Sends test patterns (corners, gradient, chase) when the browser is disconnected.
+### LED Bridge (`/bridge` & `/server`)
+Um serviço Node.js independente que atua como middleware entre o navegador e o hardware LED.
+- **WebSocket Server**: Recebe dados binários de pixels do navegador.
+- **Serial Manager**: Empacota dados no protocolo Adalight e envia via porta USB selecionada.
+- **OSC/Socket Server**: Gerencia comandos de reprodução, upload de firmware e descoberta de portas.
 
-## Getting Started
+## Como Usar (Getting Started)
 
-1. **Install Dependencies**
+1. **Instalar Dependências**
+   Na raiz do projeto:
    ```bash
-   npm install && cd bridge && npm install
+   npm install
    ```
 
-2. **Run the Bridge (For LEDs)**
+2. **Rodar o Sistema Completo**
+   Para iniciar Frontend + Bridge Serial + Bridge OSC com um único comando:
    ```bash
-   cd bridge
-   node index.js
+   npm start
    ```
+   *Isso irá abrir o Vite (porta 5173), o Bridge Serial (porta 3002) e o Servidor OSC (porta 3001/4444)*
 
-3. **Run Development Server**
-   ```bash
-   npm run dev
-   ```
-
-4. **Open in Browser**
-   Interact with the UI at `http://localhost:5173`. Toggle **BROADCASTING** in the sidebar to send data to the LEDs.
+3. **Acessar no Navegador**
+   Interaja com a interface em `http://localhost:5173`.
+   
+4. **Configurar LEDs**
+   - Vá até a aba "LED Bridge" na lateral direita.
+   - Ative o "Enable Output".
+   - Se sua ESP32 não estiver configurada, clique no ícone do "Mágico" (Wizard) para gravar o firmware.
 
 ## Roadmap & Changelog
 
-### ✅ Completed
-- [x] **Core Engine rewrite**: Transitioned to unified `ProjectorConfig` state.
-- [x] **Advanced Warping Modes**: Linear (Quad) and Bicubic (Bezier) 4x4.
-- [x] **LED Bridge Protocol**:
-    - [x] Node.js Middleware (WS to Art-Net).
-    - [x] Browser sampling logic (30 FPS).
-    - [x] Multi-universe support (180+ pixels).
-- [x] **Dual Video Engine**: Smooth crossfading between "Idle" and "Main" loops.
+### ✅ Concluído
+- [x] **Reescrita do Motor Central**: Transição para estado unificado `ProjectorConfig`.
+- [x] **Modos de Warping**: Linear (Quad) e Bicúbico (Bezier).
+- [x] **Protocolo LED**:
+    - [x] Middleware Node.js (WebSocket para Serial/Adalight).
+    - [x] Lógica de amostragem no Browser (30 FPS).
+    - [x] Suporte a 120-300 LEDs.
+- [x] **Assistente de Firmware**: Upload de binário para ESP32 via WebSerial/Esptool backend.
+- [x] **Verificação de Hardware**: Feedback visual (LEDs piscam) após gravação.
 
-### 🚧 Upcoming / Planned
-- [ ] **Edge Blending**: Soft gradient masking for overlapping projectors.
-- [ ] **Custom Grid density**: Manual N x N grid controls.
-- [ ] **Preset Management**: Export/Import configurations to JSON.
-- [ ] **Masking**: Ability to draw black masks to hide unwanted areas.
+### 🚧 Planejado / Em Breve
+- [ ] **Edge Blending**: Máscara de gradiente suave para projetores sobrepostos.
+- [ ] **Grid Personalizado**: Controles manuais de densidade N x N.
+- [ ] **Gerenciamento de Presets**: Exportar/Importar configurações em JSON.
+- [ ] **Máscaras**: Ferramenta de desenho (Pen Tool) para ocultar áreas indesejadas.
 
-## License
+## Licença
 
 MIT

@@ -1,0 +1,31 @@
+.pio/build/esp32dev/libabe/FastLED/fl/allocator.cpp.o: \
+ .pio/libdeps/esp32dev/FastLED/src/fl/allocator.cpp \
+ .pio/libdeps/esp32dev/FastLED/src/fl/allocator.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/inplacenew.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/stdint.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/int.h \
+ .pio/libdeps/esp32dev/FastLED/src/platforms/int.h \
+ .pio/libdeps/esp32dev/FastLED/src/platforms/arm/is_arm.h \
+ .pio/libdeps/esp32dev/FastLED/src/platforms/esp/int.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/memfill.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/type_traits.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/namespace.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/move.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/unused.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/bit_cast.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/bitset.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/bitset_dynamic.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/math_macros.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/has_include.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/compiler_control.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/variant.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/thread_local.h \
+ .pio/libdeps/esp32dev/FastLED/src/fl/thread.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/heap/include/esp_heap_caps.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/heap/include/multi_heap.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/esp_common/include/esp_err.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/esp_common/include/esp_compiler.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/esp_common/include/esp_attr.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/esp_system/include/esp_system.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/esp_common/include/esp_bit_defs.h \
+ /Users/brito/.platformio/packages/framework-arduinoespressif32-libs/esp32/include/esp_common/include/esp_idf_version.h
